@@ -17,7 +17,7 @@ pub const ScreenQueries = struct {
     screens: []ScreenInfo,
 
     pub fn deinit(self: *Self) void {
-        _ = c.XFree(self.screens.ptr); // FIXME: value ignored
+        xorg.internal.freeResource(self.screens.ptr);
     }
 };
 

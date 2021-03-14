@@ -22,9 +22,13 @@ pub fn build(b: *Builder) void {
         run_cmd.addArgs(args);
     }
 
-    exe.addIncludeDir("src/c_impl");
-    exe.addCSourceFile("src/c_impl/ext_xlib.c", &[_][]const u8{"-std=c99"});
-    exe.addCSourceFile("src/c_impl/ext_misc.c", &[_][]const u8{"-std=c99"});
+    {
+        const c_flags = &[_][]const u8 {"-std=c99"};
+
+        exe.addIncludeDir("src/c_impl");
+        exe.addCSourceFile("src/c_impl/ext_xlib.c", c_flags);
+        exe.addCSourceFile("src/c_impl/ext_misc.c", c_flags);
+    }
 
     const tests = b.addTest("src/main.zig");
 

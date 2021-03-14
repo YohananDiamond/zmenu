@@ -8,9 +8,7 @@ const ReadError = std.os.ReadError;
 const File = std.fs.File;
 const math = std.math;
 
-const c = struct { // FIXME: stop using this here
-    pub usingnamespace @import("apis/_bindings.zig");
-};
+const c = @import("apis/_bindings.zig"); // FIXME: stop using this here
 const draw = @import("draw.zig");
 const Point2 = @import("point.zig").Point2;
 const xorg = @import("apis/xorg.zig");
@@ -36,15 +34,19 @@ const SchemeColors = api.SchemeColors;
 const user_config = @import("config.zig");
 const str = @import("str.zig");
 
-fn attemptGrabKeyboard(display: *const xorg.Display, window_id: WindowID) error{CouldNotGrabKeyboard}!void {
+pub const GrabKeyboardError = error{CouldNotGrabKeyboard};
+
+fn attemptGrabKeyboard(display: *const xorg.Display, window_id: WindowID) GrabKeyboardError!void {
     const threshold: usize = 1000;
 
     var i: usize = 0;
     while (i < threshold) : (i += 1) {
         if (xorg.grabKeyboard(display, window_id)) {
             break;
-        } else |_| {
-            std.time.sleep(1_000_000);
+        } else |err| switch (err) {
+            error.CouldNotGrabKeyboard => {
+                std.time.sleep(1_000_000);
+            },
         }
     } else {
         return error.CouldNotGrabKeyboard;
@@ -56,10 +58,10 @@ pub fn intersectionArea( // FIXME: proper typing and understand what's going on
     y: anytype,
     width: anytype,
     height: anytype,
-    r: anytype, // FIXME: dummy variable
+    dummy_r: anytype, // FIXME: figure out what this does
 ) c_int {
-    return (math.max(0, math.min(x + width, r.x_org + r.width) - math.max(x, r.x_org)) *
-        math.max(0, math.min(y + height, r.y_org + r.height) - math.max(y, r.y_org)));
+    return (math.max(0, math.min(x + width, dummy_r.x_org + dummy_r.width) - math.max(x, dummy_r.x_org)) *
+        math.max(0, math.min(y + height, dummy_r.y_org + dummy_r.height) - math.max(y, dummy_r.y_org)));
 }
 
 pub fn main() anyerror!u8 {
@@ -74,7 +76,7 @@ pub fn main() anyerror!u8 {
         while (i < s.len) {
             const length = utf8.charLength(s[i..]);
 
-            if (length == 0) unreachable;
+            if (length == 0) unreachable; // FIXME
 
             std.debug.print("{s}\n", .{s[i .. i + length]});
 
@@ -213,43 +215,34 @@ pub fn main() anyerror!u8 {
     }
 
     {
-        const r: *const Resources = &final_cfg.base.default_resources;
+        const resources_ptr: *const Resources = &final_cfg.base.default_resources;
 
-        // Parse color schemes
-        const schemes = SchemeSet{
-            .normal = SchemeColors.initFromSchemeStrings(
-                &r.normal,
-                &display,
-                root_triplet.screen_id,
-                true,
-            ) catch |_| return 1,
-            .normal_highlight = SchemeColors.initFromSchemeStrings(
-                &r.normal_highlight,
-                &display,
-                root_triplet.screen_id,
-                true,
-            ) catch |_| return 1,
-            .sel = SchemeColors.initFromSchemeStrings(
-                &r.sel,
-                &display,
-                root_triplet.screen_id,
-                true,
-            ) catch |_| return 1,
-            .sel_highlight = SchemeColors.initFromSchemeStrings(
-                &r.sel_highlight,
-                &display,
-                root_triplet.screen_id,
-                true,
-            ) catch |_| return 1,
-            .out = SchemeColors.initFromSchemeStrings(
-                &r.out,
-                &display,
-                root_triplet.screen_id,
-                true,
-            ) catch |_| return 1,
+        const schemes = blk: {
+            var scm: SchemeSet = undefined;
+
+            const fields = &[_][]const u8{
+                "normal",
+                "normal_highlight",
+                "sel",
+                "sel_highlight",
+                "out",
+            };
+
+            inline for (fields) |name| {
+                @field(scm, name) = SchemeColors.initFromSchemeStrings(
+                    &@field(resources_ptr, name),
+                    root_triplet.display,
+                    root_triplet.screen_id,
+                    true,
+                ) catch |err| switch (err) {
+                    error.CouldNotAllocateColor => return 1,
+                };
+            }
+
+            break :blk scm;
         };
 
-        var fontset = try Fontset.init(r.fonts, alloc, &root_triplet); // TODO: consider `main_font`
+        var fontset = try Fontset.init(resources_ptr.fonts, alloc, &root_triplet); // TODO: consider `main_font`
         defer fontset.deinit();
 
         var drawctl = draw.DrawControl.init(
@@ -298,12 +291,17 @@ pub fn main() anyerror!u8 {
                         const screens = query.screens;
                         const monitor_count = screens.len;
 
-                        var dummy_w: c_ulong = undefined;
+                        var dummy_w: WindowID = undefined;
                         var dummy_di: c_int = undefined;
                         var dummy_area: c_int = 0;
-                        var dummy_pw: c.Window = undefined;
+                        var dummy_pw: WindowID = undefined;
 
-                        _ = c.XGetInputFocus(root_triplet.display.ptr, &dummy_w, &dummy_di); // FIXME: what does this do and what does it return?
+                        // From documentation:
+                        //
+                        // The XGetInputFocus function returns the focus window and the current focus state.
+                        //
+                        // Also, XGetInputFocus seems to always return 1, so let's assert that here.
+                        std.debug.assert(c.XGetInputFocus(root_triplet.display.ptr, &dummy_w, &dummy_di) == 1);
 
                         dummy_label2: {
                             if (final_cfg.monitor_id) |mon_id| {
@@ -311,12 +309,14 @@ pub fn main() anyerror!u8 {
                                     monitor_index = mon_id;
                                     break :dummy_label2;
                                 } else {
-                                    unreachable; // TODO: error out (invalid monitor ID)
+                                    // TODO: handle zero monitors (does that even happen?)
+                                    std.debug.print("error: monitor ID is way too big ({}, max {})\n", .{ mon_id, monitor_count - 1 });
+                                    return 1;
                                 }
                             }
 
-                            var dummy_dw: c.Window = undefined;
-                            var dummy_dws: [*c]c.Window = undefined;
+                            var dummy_dw: WindowID = undefined;
+                            var dummy_dws: [*c]WindowID = undefined;
                             var dummy_du: c_uint = undefined;
 
                             if (dummy_w != root_triplet.window_id and dummy_w != c.PointerRoot and dummy_w != c.None) {
@@ -333,7 +333,7 @@ pub fn main() anyerror!u8 {
                                     );
 
                                     if (dummy_result != 0 and dummy_dws != 0) {
-                                        _ = c.XFree(dummy_dws); // FIXME: wtf does this return?
+                                        xorg.internal.freeResource(dummy_dws);
                                     }
 
                                     if (dummy_w == root_triplet.window_id or dummy_w == dummy_pw)
@@ -445,42 +445,41 @@ pub fn main() anyerror!u8 {
 }
 
 fn showUsage(progname: []const u8) void {
-    std.debug.print("{s} [OPTIONS]\n", .{progname});
-    std.debug.print("  A recreation of dmenu on Zig\n", .{});
-    std.debug.print("\n", .{});
-
     // TODO: option to print item index on list instead of string
-    std.debug.print("General options:\n", .{});
-    std.debug.print("  -h, --help: show this message and exit\n", .{});
-    std.debug.print("  -v, --version: show version information and exit\n", .{});
-    std.debug.print("  -l, --lines <AMOUNT>: set the amount of lines to be showed\n", .{});
-    std.debug.print("  -p, --prompt <PROMPT>: specify the prompt to be used\n", .{});
-    std.debug.print("  --font <FONT>: specify the font ID\n", .{});
-    std.debug.print("  -m, --monitor <ID>: specify the ID of the monitor where the menu window will be shown\n", .{});
-    std.debug.print("  -e, --embed <ID>: specify a window to embed the menu onto\n", .{});
-    std.debug.print("\n", .{});
+    const help_string =
+        \\{0s} [OPTIONS]
+        \\  A dmenu rewrite in Zig
+        \\
+        \\General options:
+        \\  -h, --help: show this message and exit
+        \\  -v, --version: show version information and exit
+        \\  -l, --lines <AMOUNT>: set the amount of lines to be showed
+        \\  -p, --prompt <PROMPT>: specify the prompt to be used
+        \\  --font <FONT>: specify the font ID
+        \\  -m, --monitor <ID>: specify the ID of the monitor where the menu window will be shown
+        \\  -e, --embed <ID>: specify a window to embed the menu onto
+        \\
+        \\Position options:
+        \\  -b, --bottom: position the menu on the bottom of the screen
+        \\  -t, --top: position the menu on the top of the screen
+        \\  -c, --center: position the menu on the center of the screen
+        \\
+        \\Fuzzy matching options:
+        \\  -f, --fuzzy: enable fuzzy matching
+        \\  -F, --no-fuzzy: disable fuzzy matching
+        \\
+        \\Case sensitivity options:
+        \\  -i, --case-insensitive: disable case sensitivity matching
+        \\  -I, --case-sensitive: enable case sensitivity matching
+        \\
+        \\Keyboard grabbing options:
+        \\  At some point of its execution, {0s} grabs the keyboard so the user can select stuff.
+        \\  These options can be used to specify when the keyboard is grabbed.
+        \\  --grab-kb: grab the keyboard as soon as possible, before stdin is closed. This option is ignored if stdin is a TTY.
+        \\  --no-grab-kb: don't grab the keyboard until stdin is closed.
+    ;
 
-    std.debug.print("Position options:\n", .{});
-    std.debug.print("  -b, --bottom: position the menu on the bottom of the screen\n", .{});
-    std.debug.print("  -t, --top: position the menu on the top of the screen\n", .{});
-    std.debug.print("  -c, --center: position the menu on the center of the screen\n", .{});
-    std.debug.print("\n", .{});
-
-    std.debug.print("Fuzzy matching options:\n", .{});
-    std.debug.print("  -f, --fuzzy: enable fuzzy matching\n", .{});
-    std.debug.print("  -F, --no-fuzzy: disable fuzzy matching\n", .{});
-    std.debug.print("\n", .{});
-
-    std.debug.print("Case sensitivity options:\n", .{});
-    std.debug.print("  -i, --case-insensitive: disable case sensitivity matching\n", .{});
-    std.debug.print("  -I, --case-sensitive: enable case sensitivity matching\n", .{});
-    std.debug.print("\n", .{});
-
-    std.debug.print("Keyboard grabbing options:\n", .{});
-    std.debug.print("  At some point of its execution, {s} grabs the keyboard so the user can select stuff.\n", .{progname});
-    std.debug.print("  These options can be used to specify when the keyboard is grabbed.\n", .{});
-    std.debug.print("  --grab-kb: grab the keyboard as soon as possible, before stdin is closed. This option is ignored if stdin is a TTY.\n", .{});
-    std.debug.print("  --no-grab-kb: don't grab the keyboard until stdin is closed.\n", .{});
+    std.debug.print(help_string, .{progname});
 }
 
 pub const ArgParseResult = enum {
@@ -492,7 +491,7 @@ pub const ArgParseResult = enum {
 
 fn updateConfigFromArgs(cfg: *FinalConfig, args: []const [:0]const u8) ArgParseResult {
     const progname = if (args.len > 0)
-        std.fs.path.basename(args[0])
+        args[0]
     else
         return .NotEnoughArgs;
 
@@ -588,15 +587,15 @@ fn updateConfigFromArgs(cfg: *FinalConfig, args: []const [:0]const u8) ArgParseR
             };
         } else if (getLongOption(arg)) |opt| {
             std.debug.print("Invalid option: --{s}\n", .{arg});
-            std.debug.print("Use {s} --help for valid arguments.\n", .{std.fs.path.basename(progname)});
+            std.debug.print("Use {s} --help for valid arguments.\n", .{progname)};
             return .ExitFailure;
         } else if (getShortOption(arg)) |opt| {
             std.debug.print("Invalid option: -{s}\n", .{arg});
-            std.debug.print("Use {s} --help for valid arguments.\n", .{std.fs.path.basename(progname)});
+            std.debug.print("Use {s} --help for valid arguments.\n", .{progname)};
             return .ExitFailure;
         } else {
             std.debug.print("Invalid positional argument: {s}\n", .{arg});
-            std.debug.print("Use {s} --help for valid arguments.\n", .{std.fs.path.basename(progname)});
+            std.debug.print("Use {s} --help for valid arguments.\n", .{progname)};
             return .ExitFailure;
         }
     }
@@ -689,4 +688,8 @@ fn readLines(
             try list.append(string);
         }
     }
+}
+
+test {
+    _ = @import("str.zig");
 }

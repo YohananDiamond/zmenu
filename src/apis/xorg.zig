@@ -4,11 +4,21 @@ const Allocator = std.mem.Allocator;
 
 const c = @import("_bindings.zig");
 
+pub const internal = struct {
+    pub fn freeResource(resource: *c_void) void {
+        // XFree seems to always return 1. It doesn't even seem to throw any X error.
+        std.debug.assert(c.XFree(resource) == 1);
+    }
+};
+
 pub const WindowID = c.Window;
 pub const ScreenID = c_int; // FIXME: is this the best type? can screen IDs can be negative?
 pub const PixmapID = c.Pixmap;
 pub const WindowAttributes = c.XWindowAttributes;
 pub const GraphicalContext = c.GC;
+
+pub const pointer_root_window = c.PointerRoot;
+pub const no_window = c.None;
 
 pub const WindowTriplet = struct {
     display: *Display,
@@ -37,20 +47,17 @@ pub const Display = struct {
         // XCloseDisplay actually returns a c_int but as far as I've read it is always zero.
         //
         // My source of information: https://github.com/mirror/libX11/blob/master/src/ClDisplay.c#L73
-        //
-        // FIXME: are there any macros on that function that could potentially return?
         const result = c.XCloseDisplay(self.ptr);
         std.debug.assert(result == 0);
     }
 };
 
 pub fn defaultScreenID(display: *const Display) ScreenID {
-    // FIXME: replace with: return @as(c._XPrivDisplay)(self.ptr).*.default_screen;
     return c.ext_defaultscreen(display.ptr);
 }
 
 pub fn rootWindowID(display: *const Display, screen_id: ScreenID) WindowID {
-    return c.ext_rootwindow(display.ptr, screen_id); // FIXME: replace with manual version
+    return c.ext_rootwindow(display.ptr, screen_id);
 }
 
 pub fn windowAttributes(display: *const Display, window_id: WindowID) ?WindowAttributes {
