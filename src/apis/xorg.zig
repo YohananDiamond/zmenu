@@ -53,10 +53,12 @@ pub const Display = struct {
 };
 
 pub fn defaultScreenID(display: *const Display) ScreenID {
+    // return c.DefaultScreen(display.ptr);
     return c.ext_defaultscreen(display.ptr);
 }
 
 pub fn rootWindowID(display: *const Display, screen_id: ScreenID) WindowID {
+    // return c.RootWindow(display.ptr, screen_id);
     return c.ext_rootwindow(display.ptr, screen_id);
 }
 
