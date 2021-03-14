@@ -587,15 +587,15 @@ fn updateConfigFromArgs(cfg: *FinalConfig, args: []const [:0]const u8) ArgParseR
             };
         } else if (getLongOption(arg)) |opt| {
             std.debug.print("Invalid option: --{s}\n", .{arg});
-            std.debug.print("Use {s} --help for valid arguments.\n", .{progname)};
+            std.debug.print("Use {s} --help for valid arguments.\n", .{progname});
             return .ExitFailure;
         } else if (getShortOption(arg)) |opt| {
             std.debug.print("Invalid option: -{s}\n", .{arg});
-            std.debug.print("Use {s} --help for valid arguments.\n", .{progname)};
+            std.debug.print("Use {s} --help for valid arguments.\n", .{progname});
             return .ExitFailure;
         } else {
             std.debug.print("Invalid positional argument: {s}\n", .{arg});
-            std.debug.print("Use {s} --help for valid arguments.\n", .{progname)};
+            std.debug.print("Use {s} --help for valid arguments.\n", .{progname});
             return .ExitFailure;
         }
     }
@@ -622,12 +622,12 @@ fn getPositionalOption(string: [:0]const u8) ?[:0]const u8 { // TODO: make this 
 fn isLongOrShort(string: [:0]const u8, long: ?[:0]const u8, short: ?[:0]const u8) bool {
     if (getLongOption(string)) |opt| {
         return if (long) |long_|
-            str.equals(opt, long_, .{})
+            str.eql(opt, long_, .Optimized)
         else
             false;
     } else if (getShortOption(string)) |opt| {
         return if (short) |short_|
-            str.equals(opt, short_, .{})
+            str.eql(opt, short_, .Optimized)
         else
             false;
     } else {
