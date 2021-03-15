@@ -26,7 +26,7 @@ pub const DrawControl = struct {
                 triplet.window_id,
                 @intCast(c_uint, size.x),
                 @intCast(c_uint, size.y),
-                c.ext_defaultdepth(triplet.display.ptr, triplet.screen_id),
+                c.zmenu_defaultdepth(triplet.display.ptr, triplet.screen_id),
             ),
             .context = c.XCreateGC(triplet.display.ptr, triplet.window_id, 0, null), // FIXME: what is 0 and null
             .fontset = fontset,
@@ -61,7 +61,7 @@ pub const DrawControl = struct {
             self.window_id,
             @as(c_uint, new_size.x),
             @as(c_uint, new_size.y),
-            c.ext_defaultdepth(self.display.ptr, self.screen_id),
+            c.zmenu_defaultdepth(self.display.ptr, self.screen_id),
         );
     }
 

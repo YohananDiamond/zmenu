@@ -54,12 +54,12 @@ pub const Display = struct {
 
 pub fn defaultScreenID(display: *const Display) ScreenID {
     // return c.DefaultScreen(display.ptr);
-    return c.ext_defaultscreen(display.ptr);
+    return c.zmenu_defaultscreen(display.ptr);
 }
 
 pub fn rootWindowID(display: *const Display, screen_id: ScreenID) WindowID {
     // return c.RootWindow(display.ptr, screen_id);
-    return c.ext_rootwindow(display.ptr, screen_id);
+    return c.zmenu_rootwindow(display.ptr, screen_id);
 }
 
 pub fn windowAttributes(display: *const Display, window_id: WindowID) ?WindowAttributes {
@@ -127,8 +127,8 @@ pub const Color = struct {
         // FIXME: verify if this usage of XftColorAllocName is right
         const result = c.XftColorAllocName(
             display_ptr,
-            c.ext_defaultvisual(display_ptr, screen_id),
-            c.ext_defaultcolormap(display_ptr, screen_id),
+            c.zmenu_defaultvisual(display_ptr, screen_id),
+            c.zmenu_defaultcolormap(display_ptr, screen_id),
             string,
             &self.color,
         );

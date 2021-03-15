@@ -1,23 +1,75 @@
-pub fn charLength(string: []const u8) usize {
-    unreachable;
+pub const utf_invalid = 0xFFFD;
+pub const utf_size = 4;
+
+pub const utfbyte: [utf_size + 1]u8 = .{ 0x80, 0, 0xC0, 0xE0, 0xF0 };
+pub const utfmask: [utf_size + 1]u8 = .{ 0xC0, 0x80, 0xE0, 0xF0, 0xF8 };
+pub const utfmin: [utf_size + 1]u32 = .{ 0, 0, 0x80, 0x800, 0x10000 };
+pub const utfmax: [utf_size + 1]u32 = .{ 0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF };
+
+pub fn utf8decodebyte(c: u8, i_: *usize) c_long {
+    comptime var i: usize = 0;
+    inline while (i < utf_size + 1) : (i += 1) {
+        const cmask = comptime utfmask[i];
+        const cbyte = comptime utfbyte[i];
+
+        if (c & cmask == cbyte) {
+            i_.* = i;
+            return c & ~cmask;
+        }
+    }
+
+    return 0;
+
+    // i.* = 0;
+    // while (i.* < utf_size + 1) : (i.* += 1) {
+    //     if (c & utfmask[i.*] == utfbyte[i.*])
+    //         return c & ~utfmask[i.*];
+    // }
+    // return 0;
 }
 
-// pub const utf_invalid = 0xFFFD;
-// pub const utf_size = 4;
+pub fn utf8validate(u: *c_long, i: usize) usize {
+    if (!(utfmin[i] < u.* and u.* < utfmax[i]) or (0xD800 < u.* and u.* < 0xDFFF))
+        u.* = utf_invalid;
 
-// // FIXME: figure out what each of these mean
-// pub const utfbyte: [utf_size + 1]u8 = .{ 0x80, 0, 0xC0, 0xE0, 0xF0 };
-// pub const utfmask: [utf_size + 1]u8 = .{ 0xC0, 0x80, 0xE0, 0xF0, 0xF8 };
-// pub const utfmin: [utf_size + 1]u32 = .{ 0, 0, 0x80, 0x800, 0x10000 };
-// pub const utfmax: [utf_size + 1]u32 = .{ 0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF };
+    var j: usize = 1;
+    while (u.* > utfmax[j]) : (j += 1) {}
 
-// // #define UTF_INVALID 0xFFFD
-// // #define UTF_SIZ     4
+    return j;
+}
 
-// // static const unsigned char utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
-// // static const unsigned char utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
-// // static const long utfmin[UTF_SIZ + 1] = {       0,    0,  0x80,  0x800,  0x10000};
-// // static const long utfmax[UTF_SIZ + 1] = {0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
+pub fn utf8decode(c: [*:0]const u8, u: *c_long, clen: usize) usize {
+    u.* = utf_invalid;
+
+    if (clen == 0) return 0;
+
+    var len: usize = undefined;
+    var udecoded: c_long = utf8decodebyte(c[0], &len);
+
+    // FIXME: I'm watching a vid, might not get accurate
+    if (!(1 < len and len < utf_size))
+        return 1;
+
+    var i: usize = 1;
+    var j: usize = 1;
+    while (i < clen and j < len) : ({
+        i += 1;
+        j += 1;
+    }) {
+        var type_: usize = undefined;
+        udecoded = (udecoded << 6) | utf8decodebyte(c[i], &type_);
+        if (type_ != 0)
+            return j;
+    }
+
+    if (j < len)
+        return 0;
+
+    u.* = udecoded;
+    _ = utf8validate(u, len);
+
+    return len;
+}
 
 // pub const DecodeResult = struct {
 //     decoded: u32,

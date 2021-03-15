@@ -1,4 +1,4 @@
-pub const has_xinerama: bool = true;
+const build_options = @import("build_options");
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -12,7 +12,7 @@ const c = @import("apis/_bindings.zig"); // FIXME: stop using this here
 const draw = @import("draw.zig");
 const Point2 = @import("point.zig").Point2;
 const xorg = @import("apis/xorg.zig");
-const xinerama = if (has_xinerama)
+const xinerama = if (build_options.use_xinerama)
     @import("apis/xinerama.zig")
 else
     struct {};
@@ -24,12 +24,12 @@ const WindowID = xorg.WindowID;
 const Fontset = xorg.Fontset;
 const WindowTriplet = xorg.WindowTriplet;
 
-const api = @import("api.zig");
-const BaseConfig = api.BaseConfig;
-const FinalConfig = api.FinalConfig;
-const Resources = api.Resources;
-const SchemeSet = api.SchemeSet;
-const SchemeColors = api.SchemeColors;
+const data = @import("data.zig");
+const BaseConfig = data.BaseConfig;
+const FinalConfig = data.FinalConfig;
+const Resources = data.Resources;
+const SchemeSet = data.SchemeSet;
+const SchemeColors = data.SchemeColors;
 
 const user_config = @import("config.zig");
 const str = @import("str.zig");
@@ -67,23 +67,6 @@ pub fn intersectionArea( // FIXME: proper typing and understand what's going on
 pub fn main() anyerror!u8 {
     std.debug.print("Starting...\n", .{}); // FIXME: remove this
 
-    {
-        const s = "Hello, World!";
-        const utf8 = @import("utf8.zig");
-
-        var i: usize = 0;
-
-        while (i < s.len) {
-            const length = utf8.charLength(s[i..]);
-
-            if (length == 0) unreachable; // FIXME
-
-            std.debug.print("{s}\n", .{s[i .. i + length]});
-
-            i += length;
-        }
-    }
-
     switch (std.Target.current.os.tag) {
         .linux => {},
         .openbsd => {
@@ -98,12 +81,10 @@ pub fn main() anyerror!u8 {
             // See https://man.openbsd.org/OpenBSD-6.2/pledge.2 for more info.
             const promises = "stdio rpath";
 
-            const result = std.c.pledge(
+            if (std.c.pledge(
                 promises,
                 null, // we're not doing anything with execpromises
-            );
-
-            if (result == -1) {
+            ) == -1) {
                 std.debug.print("Failed to pledge with promises: {s}\n", .{promises});
                 return 1;
             }
@@ -284,7 +265,7 @@ pub fn main() anyerror!u8 {
         var monitor_index: usize = 0;
 
         const attrs: AttrsBlk = attrs_blk: {
-            if (has_xinerama) xinerama_blk: {
+            if (build_options.use_xinerama) xinerama_blk: {
                 if (target_win == root_triplet.window_id) {
                     if (xinerama.queryScreens(root_triplet.display)) |*query| {
                         defer query.deinit();
@@ -691,6 +672,7 @@ fn readLines(
 }
 
 test {
+    // Entry point for all tests
     _ = @import("point.zig");
     _ = @import("utf8.zig");
     _ = @import("draw.zig");

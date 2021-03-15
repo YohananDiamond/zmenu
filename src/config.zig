@@ -1,6 +1,6 @@
-const BaseConfig = @import("api.zig").BaseConfig;
-const Resources = @import("api.zig").Resources;
-const SchemeStrings = @import("api.zig").SchemeStrings;
+const BaseConfig = @import("data.zig").BaseConfig;
+const Resources = @import("data.zig").Resources;
+const SchemeStrings = @import("data.zig").SchemeStrings;
 
 pub const cfg = BaseConfig{
     .position = .Centered,

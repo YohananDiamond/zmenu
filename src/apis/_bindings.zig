@@ -2,11 +2,10 @@ pub usingnamespace @cImport({
     @cInclude("X11/Xlib.h");
     @cInclude("X11/Xft/Xft.h");
     @cInclude("X11/Xresource.h");
-    @cInclude("ext_xlib.h");
-    @cInclude("ext_misc.h");
+    @cInclude("zmenu_xlib.h");
     @cInclude("locale.h");
 
-    if (@import("../main.zig").has_xinerama) {
+    if (@import("build_options").use_xinerama) {
         @cInclude("X11/extensions/Xinerama.h");
     }
 });

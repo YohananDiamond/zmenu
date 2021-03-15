@@ -1,3 +1,7 @@
+//! General data structure declarations.
+//!
+//! I'm not sure where I would put it, so I put them here.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 

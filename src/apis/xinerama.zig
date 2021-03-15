@@ -1,5 +1,5 @@
 comptime {
-    if (!@import("../main.zig").has_xinerama) {
+    if (!@import("build_options").use_xinerama) {
         @compileError("Attempt to use Xinerama while it is not available");
     }
 }
