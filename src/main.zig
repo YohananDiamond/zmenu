@@ -9,14 +9,13 @@ const ReadError = std.os.ReadError;
 const File = std.fs.File;
 const math = std.math;
 
-const c = @import("apis/_bindings.zig"); // FIXME: stop using this here
 const draw = @import("draw.zig");
 const Point2 = @import("point.zig").Point2;
-const xorg = @import("apis/xorg.zig");
-const xinerama = if (build_options.use_xinerama) // TODO: transform this into a ?type conditional to the existence of xinerama
-    @import("apis/xinerama.zig")
-else
-    struct {};
+
+const apis = @import("apis.zig");
+const c = apis.bindings; // FIXME: stop using this here
+const xorg = apis.xorg;
+const xinerama = apis.xinerama;
 
 const ResourceManager = xorg.ResourceManager;
 const Display = xorg.Display;
@@ -253,9 +252,9 @@ pub fn main() anyerror!u8 {
         var monitor_index: usize = 0;
 
         const attrs: AttrsBlk = attrs_blk: {
-            if (build_options.use_xinerama) xinerama_blk: {
+            if (xinerama) |xn| xinerama_blk: {
                 if (target_win == root_triplet.window_id) {
-                    if (xinerama.queryScreens(root_triplet.display)) |*query| {
+                    if (xn.queryScreens(root_triplet.display)) |*query| {
                         defer query.deinit();
                         const screens = query.screens;
                         const monitor_count = screens.len;
@@ -867,22 +866,24 @@ fn attemptGrabFocus(display: *Display, window_id: WindowID) GrabFocusError!void 
     return error.CouldNotGrabFocus;
 }
 
-pub fn intersectionArea(
-    comptime PosType: type,
-    comptime SizeType: type,
-    pos: Point2(PosType),
-    size: Point2(SizeType),
-    screen_info: *const xinerama.ScreenInfo, // FIXME: why is this even needed here?
-) c_int {
-    const max = math.max;
-    const min = math.min;
+usingnamespace if (xinerama) |xn| struct {
+    pub fn intersectionArea(
+        comptime PosType: type,
+        comptime SizeType: type,
+        pos: Point2(PosType),
+        size: Point2(SizeType),
+        screen_info: *const xn.ScreenInfo, // FIXME: why is this even needed here?
+    ) c_int {
+        const max = math.max;
+        const min = math.min;
 
-    const si = screen_info;
-    const part1 = max(0, min(pos.x + size.x, si.x_org + si.width)) - max(pos.x, si.x_org);
-    const part2 = max(0, min(pos.y + size.y, si.y_org + si.height)) - max(pos.y, si.y_org);
+        const si = screen_info;
+        const part1 = max(0, min(pos.x + size.x, si.x_org + si.width)) - max(pos.x, si.x_org);
+        const part2 = max(0, min(pos.y + size.y, si.y_org + si.height)) - max(pos.y, si.y_org);
 
-    return part1 * part2;
-}
+        return part1 * part2;
+    }
+} else struct {};
 
 const MenuConfig = struct {
     size: Point2(u32),

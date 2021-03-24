@@ -1,13 +1,14 @@
+const build_options = @import("build_options");
+const apis = @import("../apis.zig");
+const xorg = apis.xorg;
+const c = apis.bindings;
+const Display = xorg.Display;
+
 comptime {
-    if (!@import("build_options").use_xinerama) {
+    if (!build_options.use_xinerama) {
         @compileError("Attempt to use Xinerama while it is not available");
     }
 }
-
-const xorg = @import("xorg.zig");
-const Display = xorg.Display;
-
-const c = @import("_bindings.zig");
 
 pub const ScreenInfo = c.XineramaScreenInfo;
 
