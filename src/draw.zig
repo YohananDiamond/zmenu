@@ -1,4 +1,8 @@
+const std = @import("std");
+
 const Point2 = @import("point.zig").Point2;
+
+const utf8 = @import("utf8.zig");
 
 const xorg = @import("apis/xorg.zig");
 const WindowTriplet = xorg.WindowTriplet;
@@ -46,8 +50,8 @@ pub const DrawControl = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        _ = c.XFreePixmap(self.triplet.display.ptr, self.pixmap); // FIXME: ignoring unknown value
-        _ = c.XFreeGC(self.triplet.display.ptr, self.context); // FIXME: ignoring unknown value
+        xorg.internal.freePixmap(self.triplet.display, self.pixmap);
+        xorg.internal.freeGraphicalContext(self.triplet.display, self.context);
     }
 
     pub fn resize(self: *Self, new_size: Point2(u32)) void {
@@ -55,44 +59,136 @@ pub const DrawControl = struct {
         self.size = new_size;
 
         // free old pixmap and create a new one
-        _ = c.XFreePixmap(self.display.ptr, self.pixmap); // FIXME: ignoring unknown value
+        xorg.internal.freePixmap(self.triplet.display, self.pixmap);
         self.pixmap = c.XCreatePixmap(
-            self.display.ptr,
-            self.window_id,
+            self.triplet.display.ptr,
+            self.triplet.window_id,
             @as(c_uint, new_size.x),
             @as(c_uint, new_size.y),
-            c.zmenu_defaultdepth(self.display.ptr, self.screen_id),
+            c.zmenu_defaultdepth(self.triplet.display.ptr, self.triplet.screen_id),
         );
     }
 
-    pub fn getTextWidth(self: *const Self, text: []const u8) usize {
-        return Self.drawText(
-            @intToPtr(*Self, @ptrToInt(self)), // casting away the const because we won't really draw anything
-            text,
-            DrawMode.GetWidth,
-            // DrawMode{ .GetWidth },
-            0,
-            0,
-        );
+    pub fn getTextWidth(
+        self: *const Self,
+        text: []const u8,
+    ) usize {
+        return 200; // FIXME: dummy value
+
+        // const mut_self = @intToPtr(*Self, @ptrToInt(self));
+
+        // while (true) {
+        //     var string_len: usize = 0;
+
+        //     var i: usize = 0;
+        //     while (i < text.len) {
+        //         const decoded = utf8.decode(text[i..], utf_siz);
+        //         const length = decoded.len;
+        //         const codepoint = decoded.dummy_value;
+
+        //         for (self.fontset.fonts.items) |*font| {
+        //             const char_exists = c.XftCharExists(
+        //                 self.triplet.display.ptr,
+        //                 font.font,
+        //                 codepoint,
+        //             );
+
+        //             if (char_exists) {
+        //                 string_len += length;
+        //                 i += length;
+        //             }
+        //         }
+        //     }
+        // }
     }
 
-    pub const DrawMode = union(enum) {
-        Render: struct {
-            position: Point2(i32),
-            size: Point2(u32),
-        },
-        GetWidth: void,
+    ///////////////////////////////////////////////////
+
+    /// Set the color to be used on the next draw operation.
+    pub fn setColor(self: *Self, color: *const xorg.Color) void {
+        std.debug.assert(c.XSetForeground(
+            self.triplet.display.ptr,
+            self.context,
+            color.pixel(),
+        ) == 1);
+    }
+
+    const RectFill = enum {
+        Filled,
+        Outline,
     };
+
+    pub fn drawRectWithLastColor(
+        self: *Self,
+        top_left: Point2(i32),
+        size: Point2(u32),
+        mode: RectFill, // FIXME(someday): this could be an inline argument
+    ) void {
+        switch (mode) {
+            .Filled => {
+                std.debug.assert(c.XFillRectangle(
+                    self.triplet.display.ptr,
+                    self.pixmap,
+                    self.context,
+                    @as(c_int, top_left.x),
+                    @as(c_int, top_left.y),
+                    @as(c_uint, size.x),
+                    @as(c_uint, size.y),
+                ) == 1);
+            },
+            .Outline => {
+                std.debug.assert(c.XDrawRectangle(
+                    self.triplet.display.ptr,
+                    self.pixmap,
+                    self.context,
+                    @as(c_int, top_left.x),
+                    @as(c_int, top_left.y),
+                    @as(c_uint, size.x - 1), // FIXME: will crash when size.x == 0
+                    @as(c_uint, size.y - 1), // FIXME: will crash when size.x == 0
+                ) == 1);
+            },
+        }
+    }
+
+    pub fn drawRect(
+        self: *Self,
+        top_left: Point2(i32),
+        size: Point2(u32), // TODO: combine both args into a rect type
+        mode: RectFill, // FIXME(someday): this could be an inline argument
+        color: *const xorg.Color,
+    ) void {
+        self.setColor(color);
+        self.drawRectWithLastColor(top_left, size, mode);
+    }
 
     pub fn drawText(
         self: *Self,
-        text: []const u8,
-        mode: DrawMode,
+        text: [:0]const u8,
+        pos: Point2(i32),
+        size: Point2(u32),
         left_padding: u32, // FIXME: ???
-        invert: anytype, // FIXME: ???
-    ) usize {
-        const used_font = self.fontset.fonts;
+        fg_color: *const xorg.Color,
+        bg_color: *const xorg.Color,
+    ) struct { text_width: u32 } {
+        // assume `render = true`
 
-        unreachable;
+        self.setColor(bg_color);
+        self.drawRectWithLastColor(
+            pos,
+            size,
+            .Filled
+        );
+
+        const dummy_d: ?*c.XftDraw = c.XftDrawCreate(
+            self.triplet.display.ptr,
+            self.pixmap,
+            c.zmenu_defaultvisual(self.triplet.display.ptr, self.triplet.screen_id),
+            c.zmenu_defaultcolormap(self.triplet.display.ptr, self.triplet.screen_id),
+        );
+
+        var x = left_padding;
+        var w = left_padding;
+
+        return .{ .text_width = 0 }; // FIXME
     }
 };

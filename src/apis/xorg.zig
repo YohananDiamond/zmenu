@@ -9,6 +9,14 @@ pub const internal = struct {
         // XFree seems to always return 1. It doesn't even seem to throw any X error.
         std.debug.assert(c.XFree(resource) == 1);
     }
+
+    pub fn freePixmap(display: *Display, pixmap: PixmapID) void {
+        std.debug.assert(c.XFreePixmap(display.ptr, pixmap) == 1);
+    }
+
+    pub fn freeGraphicalContext(display: *Display, pixmap: GraphicalContext) void {
+        std.debug.assert(c.XFreeGC(display.ptr, pixmap) == 1);
+    }
 };
 
 pub const WindowID = c.Window;
@@ -16,9 +24,11 @@ pub const ScreenID = c_int; // FIXME: is this the best type? can screen IDs can 
 pub const PixmapID = c.Pixmap;
 pub const WindowAttributes = c.XWindowAttributes;
 pub const GraphicalContext = c.GC;
+pub const Timestamp = c.Time;
 
-pub const pointer_root_window = c.PointerRoot;
-pub const no_window = c.None;
+pub const current_time: Timestamp = 0;
+pub const pointer_root: WindowID = c.PointerRoot;
+pub const none: WindowID = c.None;
 
 pub const WindowTriplet = struct {
     display: *Display,
@@ -27,6 +37,8 @@ pub const WindowTriplet = struct {
 };
 
 pub const Display = struct {
+    // TODO: turn this into DisplayRef maybe?
+
     const Self = @This();
 
     pub const OpenDisplayError = error{OpenDisplayError};
@@ -69,18 +81,29 @@ pub fn windowAttributes(display: *const Display, window_id: WindowID) ?WindowAtt
     return if (result != 0) wa else null;
 }
 
-pub fn grabKeyboard(display: *const Display, window_id: WindowID) error{CouldNotGrabKeyboard}!void {
-    // TODO: study properly XGrabKeyboard and add more options, possibly
-    const result = c.XGrabKeyboard(
+pub fn grabKeyboard(
+    display: *Display,
+    window_id: WindowID,
+    options: struct {
+        const SyncOrAsync = enum {
+            Sync = 0,
+            Async = 1,
+        };
+
+        owner_events: bool,
+        pointer_mode: SyncOrAsync,
+        keyboard_mode: SyncOrAsync,
+        time: Timestamp,
+    },
+) error{CouldNotGrabKeyboard}!void {
+    if (c.XGrabKeyboard(
         display.ptr,
         window_id,
-        @boolToInt(true),
-        c.GrabModeAsync,
-        c.GrabModeAsync,
-        c.CurrentTime,
-    );
-
-    if (result != c.GrabSuccess)
+        @boolToInt(options.owner_events),
+        @enumToInt(options.pointer_mode),
+        @enumToInt(options.keyboard_mode),
+        options.time,
+    ) != c.GrabSuccess)
         return error.CouldNotGrabKeyboard;
 }
 
@@ -116,6 +139,10 @@ pub const Color = struct {
 
     pub const InitError = error{CouldNotAllocateColor};
 
+    pub fn pixel(self: *const Self) callconv(.Inline) c_ulong { // FIXME: remove inline, rename to getPixel
+        return self.color.pixel;
+    }
+
     pub fn parse(
         string: [*:0]const u8,
         display: *const Display,
@@ -139,7 +166,7 @@ pub const Color = struct {
             self;
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Self) void { // FIXME: is this even being used?
         c.XftColorFree(&self.color); // FIXME: not sure if this is right either
     }
 };
@@ -283,3 +310,34 @@ pub const Fontset = struct {
 };
 
 pub const Pixmap = @compileError("TODO");
+
+pub const InputEventMask = c_long;
+
+pub const input_events = struct {
+    pub const focus_change = c.FocusChangeMask;
+    pub const substructure_notify = c.SubstructureNotifyMask;
+};
+
+pub fn selectInput(display: *Display, window_id: WindowID, events: InputEventMask) void {
+    // TODO: turn `events` into a packed struct
+    std.debug.assert(c.XSelectInput(
+        display.ptr,
+        window_id,
+        events,
+    ) == 1);
+}
+
+pub fn setWindowBorderColor(display: *Display, window_id: WindowID, color: *const Color) void {
+    std.debug.assert(c.XSetWindowBorder(display.ptr, window_id, color.pixel()) == 1);
+}
+
+pub const ClassHints = c.XClassHint;
+
+pub fn setClassHint(display: *Display, window_id: WindowID, hints: *ClassHints) void { // FIXME: should `hints` be `*` or `*const`?
+    std.debug.assert(c.XSetClassHint(display.ptr, window_id, hints) == 1);
+}
+
+test "open and close display" {
+    var display = try Display.init();
+    defer display.deinit();
+}

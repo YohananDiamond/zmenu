@@ -1,34 +1,67 @@
+// TODO: better naming
+
 pub const utf_invalid = 0xFFFD;
 pub const utf_size = 4;
 
-pub const utfbyte: [utf_size + 1]u8 = .{ 0x80, 0, 0xC0, 0xE0, 0xF0 };
+pub const utfbyte: [utf_size + 1]u8 = .{ 0x80, 0x00, 0xC0, 0xE0, 0xF0 };
 pub const utfmask: [utf_size + 1]u8 = .{ 0xC0, 0x80, 0xE0, 0xF0, 0xF8 };
-pub const utfmin: [utf_size + 1]u32 = .{ 0, 0, 0x80, 0x800, 0x10000 };
+pub const utfmin: [utf_size + 1]u32 = .{ 0x00, 0x00, 0x80, 0x800, 0x10000 };
 pub const utfmax: [utf_size + 1]u32 = .{ 0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF };
 
-pub fn utf8decodebyte(c: u8, i_: *usize) c_long {
-    comptime var i: usize = 0;
-    inline while (i < utf_size + 1) : (i += 1) {
-        const cmask = comptime utfmask[i];
-        const cbyte = comptime utfbyte[i];
+pub const CharsIterator = struct {
+    const Self = @This();
 
-        if (c & cmask == cbyte) {
-            i_.* = i;
-            return c & ~cmask;
-        }
+    position: usize,
+    string: [:0]const u8,
+
+    pub fn init(string: [:0]const u8) Self {
+        return Self{
+            .string = string,
+            .position = 0,
+        };
     }
 
-    return 0;
+    pub fn next(self: *Self) ?[]const u8 {
+        if (self.position < self.string.len) {
+            const slice = self.string[self.position..];
+            const decoded = decode(slice, utf_size);
 
-    // i.* = 0;
-    // while (i.* < utf_size + 1) : (i.* += 1) {
-    //     if (c & utfmask[i.*] == utfbyte[i.*])
-    //         return c & ~utfmask[i.*];
-    // }
-    // return 0;
+            const start = self.position;
+            const end = self.position + decoded.length;
+
+            self.position += decoded.length;
+            return self.string[start..end];
+        } else {
+            return null;
+        }
+    }
+};
+
+pub const DecodedByte = struct {
+    masked_c: c_long,
+    dummy_value: usize,
+};
+
+pub fn decodeByte(byte: u8) DecodedByte {
+    comptime var i: usize = 0;
+    inline while (i < utf_size + 1) : (i += 1) {
+        const cur_mask = comptime utfmask[i];
+        const cur_byte = comptime utfbyte[i];
+
+        if (byte & cur_mask == cur_byte)
+            return DecodedByte{
+                .masked_c = byte & ~cur_mask,
+                .dummy_value = i,
+            };
+    }
+
+    return DecodedByte{
+        .masked_c = 0,
+        .dummy_value = 0,
+    };
 }
 
-pub fn utf8validate(u: *c_long, i: usize) usize {
+pub fn validate(u: *c_long, i: usize) usize {
     if (!(utfmin[i] < u.* and u.* < utfmax[i]) or (0xD800 < u.* and u.* < 0xDFFF))
         u.* = utf_invalid;
 
@@ -38,96 +71,58 @@ pub fn utf8validate(u: *c_long, i: usize) usize {
     return j;
 }
 
-pub fn utf8decode(c: [*:0]const u8, u: *c_long, clen: usize) usize {
-    u.* = utf_invalid;
+pub const CharInfo = struct {
+    length: usize,
+    dummy_value: c_long,
+};
 
-    if (clen == 0) return 0;
+pub fn decode(
+    string: [*:0]const u8,
+    max_char_size: usize,
+) CharInfo {
+    if (max_char_size == 0)
+        return CharInfo{
+            .length = 0,
+            .dummy_value = utf_invalid,
+        };
 
-    var len: usize = undefined;
-    var udecoded: c_long = utf8decodebyte(c[0], &len);
+    const first_byte = decodeByte(string[0]);
+    const first_byte_len = first_byte.dummy_value;
 
-    // FIXME: I'm watching a vid, might not get accurate
-    if (!(1 < len and len < utf_size))
-        return 1;
+    var udecoded = first_byte.masked_c;
+
+    if (first_byte_len == 0 or utf_size < first_byte_len) // FIXME: utf_size < len... too big?
+        return CharInfo{
+            .length = 1,
+            .dummy_value = utf_invalid,
+        };
 
     var i: usize = 1;
-    var j: usize = 1;
-    while (i < clen and j < len) : ({
-        i += 1;
-        j += 1;
-    }) {
-        var type_: usize = undefined;
-        udecoded = (udecoded << 6) | utf8decodebyte(c[i], &type_);
-        if (type_ != 0)
-            return j;
+    const char_limit = std.math.min(max_char_size, first_byte_len);
+
+    while (i < char_limit) : (i += 1) {
+        const current = decodeByte(string[i]);
+
+        udecoded = (udecoded << 6) | current.masked_c;
+
+        if (current.dummy_value != 0)
+            return CharInfo{
+                .length = 0,
+                .dummy_value = utf_invalid,
+            };
     }
 
-    if (j < len)
-        return 0;
+    if (i < first_byte_len)
+        return CharInfo{
+            .length = 1,
+            .dummy_value = utf_invalid,
+        };
 
-    u.* = udecoded;
-    _ = utf8validate(u, len);
+    var idk: c_long = undefined;
+    _ = validate(&idk, first_byte_len);
 
-    return len;
+    return CharInfo{
+        .length = first_byte_len,
+        .dummy_value = idk,
+    };
 }
-
-// pub const DecodeResult = struct {
-//     decoded: u32,
-//     i: usize,
-// };
-
-// pub fn decodeByte(byte: u8) !DecodeResult {
-//     comptime var i: usize = 0;
-
-//     inline while (i < utf_size + 1) : (i += 1) {
-//         if (byte & utfmask[i] == utfbyte[i]) {
-//             return DecodeResult{
-//                 .Success = .{
-//                     .decoded = (byte & ~utfmask[i]),
-//                     .i = i,
-//                 },
-//             };
-//         }
-//     }
-
-//     return error.InvalidUtf8Byte;
-// }
-
-// pub const CharInfo = struct {
-//     codepoint: u32,
-//     length: usize,
-// };
-
-// pub fn getFirstCharLength(string: []const u8, dummy_clen: usize) !?CharInfo {
-//     var decoded: void = undefined;
-
-//     if (string.len == 0)
-//         return null;
-
-//     if (dummy_clen == 0)
-//         return null;
-
-//     if (decodeByte(string[0])) |byteinfo| {
-//         if (!(1 <= byteinfo.i and byteinfo.i <= utf_size)) {
-//             return CharInfo{
-//                 .codepoint = utf_invalid, // FIXME: ???
-//                 .length = 1,
-//             };
-//         }
-
-//         decoded = byteinfo.decoded;
-//     } else |err| switch (err) {
-//         error.InvalidUtf8Byte => return error.InvalidUtf8Byte,
-//     }
-
-//     var i: usize = 1;
-//     while (i < dummy_clen and i < decoded.i) : (i += 1) {
-//         const decoded_byte = decodeByte(string[i]);
-
-//         if (decoded_byte.i != 0) {
-//             return i;
-//         }
-
-//         decoded = (decoded << 6) | decoded_byte.decoded;
-//     }
-// }

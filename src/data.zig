@@ -52,23 +52,19 @@ pub const SchemeColors = struct {
         screen_id: ScreenID,
         print_error: bool,
     ) error{CouldNotAllocateColor}!Self {
-        const fg = Color.parse(ss.fg, display, screen_id) catch |err| {
-            if (print_error) {
-                std.debug.print("Failed to allocate foreground color: {s}\n", .{ss.fg});
-            }
-            return err;
-        };
-
-        const bg = Color.parse(ss.bg, display, screen_id) catch |err| {
-            if (print_error) {
-                std.debug.print("Failed to allocate background color: {s}\n", .{ss.bg});
-            }
-            return err;
-        };
-
         return Self{
-            .fg = fg,
-            .bg = bg,
+            .fg = Color.parse(ss.fg, display, screen_id) catch |err| {
+                if (print_error) {
+                    std.debug.print("Failed to allocate foreground color: {s}\n", .{ss.fg});
+                }
+                return err;
+            },
+            .bg = Color.parse(ss.bg, display, screen_id) catch |err| {
+                if (print_error) {
+                    std.debug.print("Failed to allocate background color: {s}\n", .{ss.bg});
+                }
+                return err;
+            },
         };
     }
 
@@ -78,15 +74,9 @@ pub const SchemeColors = struct {
     }
 };
 
-pub const BaseConfig = struct {
-    const Self = @This();
-
+pub const Config = struct {
     /// The position/alignment of the menu on the screen.
-    position: union(enum) {
-        Top: void,
-        Bottom: void,
-        Centered: void,
-    },
+    position: MenuPosition,
 
     /// Whether fuzzy finding is enabled.
     fuzzy: bool,
@@ -94,28 +84,62 @@ pub const BaseConfig = struct {
     /// Whether case sensitivity is enabled.
     case_sensitive: bool,
 
-    /// The amount of lines.
+    /// The amount of lines to show.
+    /// TODO: document 0
     lines: usize,
 
+    /// The prompt, if any.
     prompt: ?[:0]const u8,
 
-    default_resources: Resources,
+    /// TODO: doc
+    default_resources: *const Resources,
 
+    /// TODO: doc
     word_delimeters: []const u8,
 
+    /// TODO: doc
     border_width: usize,
 
-    grab_kb: enum { Early, Late },
+    /// TODO: doc
+    grab_kb: KeyboardGrab,
+
+    /// TODO: doc
+    pub const MenuPosition = enum {
+        Top,
+        Bottom,
+        Centered,
+    };
+
+    /// TODO: doc
+    pub const KeyboardGrab = enum {
+        Early,
+        Late,
+    };
 };
 
 pub const FinalConfig = struct {
-    const Self = @This();
+    /// TODO: doc (forward to Config idk)
+    position: Config.MenuPosition,
+    fuzzy: bool,
+    case_sensitive: bool,
+    lines: usize,
+    default_resources: *const Resources,
+    word_delimeters: []const u8,
+    border_width: usize,
+    grab_kb: Config.KeyboardGrab,
 
-    base: *BaseConfig,
+    /// TODO: doc (with differences)
+    prompt: [:0]const u8,
 
-    parent_window_id: ?u64,
+    /// TODO: doc
+    parent_window: ?WindowID,
+
+    /// TODO: doc
     monitor_id: ?u32,
+
+    /// TODO: doc
     is_embed: bool,
 
+    /// TODO: doc
     main_font: ?[:0]const u8,
 };
