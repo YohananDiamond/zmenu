@@ -2,7 +2,8 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
-const c = @import("_bindings.zig");
+const api = @import("../apis.zig");
+const c = api.bindings;
 
 pub const internal = struct {
     pub fn freeResource(resource: *c_void) void {

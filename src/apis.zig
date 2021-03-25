@@ -7,4 +7,4 @@ pub const xinerama: ?type = if (build_options.use_xinerama)
 else
     null;
 
-pub const bindings = @import("apis/_bindings.zig");
+pub const bindings = @import("apis/bindings.zig");

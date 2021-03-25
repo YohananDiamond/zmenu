@@ -4,10 +4,11 @@ const Point2 = @import("point.zig").Point2;
 
 const utf8 = @import("utf8.zig");
 
-const xorg = @import("apis/xorg.zig");
+const apis = @import("apis.zig");
+const xorg = apis.xorg;
 const WindowTriplet = xorg.WindowTriplet;
 
-const c = @import("apis/_bindings.zig"); // FIXME: stop using this here
+const c = apis.bindings; // FIXME: stop using this here
 
 pub const DrawControl = struct {
     triplet: *const WindowTriplet,

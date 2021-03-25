@@ -5,7 +5,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const xorg = @import("apis/xorg.zig");
+const apis = @import("apis.zig");
+const xorg = apis.xorg;
 const Display = xorg.Display;
 const WindowID = xorg.WindowID;
 const Color = xorg.Color;
