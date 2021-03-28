@@ -79,9 +79,9 @@ pub fn main() anyerror!u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
-    // TODO: refactor this to use std.process.ArgIterator
+    // TODO: refactor this to use std.process.ArgIterator or something else
     const args = try std.process.argsAlloc(&gpa.allocator);
-    defer std.process.argsFree(&gpa.allocator, args); // we're only gonna do this at the end of the program, so we can use the arg strings freely on the program.
+    defer std.process.argsFree(&gpa.allocator, args); // we're only gonna do this at the end of the program, so we can use the arg strings freely here.
 
     const cfg = switch (parseArgs(&user_config.cfg, args)) {
         .NotEnoughArgs => {
