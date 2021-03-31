@@ -1,24 +1,11 @@
+// TODO: refactor this into a separate package
+
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
 const api = @import("../apis.zig");
 const c = api.bindings;
-
-pub const internal = struct {
-    pub fn freeResource(resource: *c_void) void {
-        // XFree seems to always return 1. It doesn't even seem to throw any X error.
-        std.debug.assert(c.XFree(resource) == 1);
-    }
-
-    pub fn freePixmap(display: *Display, pixmap: PixmapID) void {
-        std.debug.assert(c.XFreePixmap(display.ptr, pixmap) == 1);
-    }
-
-    pub fn freeGraphicalContext(display: *Display, pixmap: GraphicalContext) void {
-        std.debug.assert(c.XFreeGC(display.ptr, pixmap) == 1);
-    }
-};
 
 pub const WindowID = c.Window;
 pub const ScreenID = c_int; // FIXME: is this the best type? can screen IDs can be negative?
@@ -31,62 +18,86 @@ pub const current_time: Timestamp = 0;
 pub const pointer_root: WindowID = c.PointerRoot;
 pub const none: WindowID = c.None;
 
-pub const WindowTriplet = struct {
-    display: *Display,
-    screen_id: ScreenID,
-    window_id: WindowID,
-};
+pub const defaultScreenID = @compileError("This function deprecated - use Display.defaultScreenID instead");
+
+pub fn rootWindowID(display: *const Display, screen_id: ScreenID) WindowID {
+    return c.zmenu_rootwindow(display.ptr, screen_id);
+}
+
+pub fn hasLocaleSupport() bool {
+    if (c.setlocale(c.LC_CTYPE, "") == null) return false;
+    if (c.XSupportsLocale() != 1) return false;
+
+    return true;
+}
 
 pub const Display = struct {
-    // TODO: turn this into DisplayRef maybe?
+    ptr: *c.Display,
 
     const Self = @This();
 
-    pub const OpenDisplayError = error{OpenDisplayError};
+    pub const OpenError = error{FailedToOpenDisplay};
 
-    ptr: *c.Display,
+    pub const InitOptions = struct {
+        display_name: ?[:0]const u8 = null,
+    };
 
-    pub fn init() OpenDisplayError!Self {
-        return Self{
-            .ptr = c.XOpenDisplay(0) orelse return error.OpenDisplayError,
-        };
-    }
-
-    pub fn fromPtr(ptr: *c.Display) callconv(.Inline) Self {
-        return Self{ .ptr = ptr };
+    pub fn init(options: InitOptions) OpenError!Self {
+        return Self{ .ptr = c.XOpenDisplay(null) orelse return OpenError.FailedToOpenDisplay };
     }
 
     pub fn deinit(self: *Self) void {
         // XCloseDisplay actually returns a c_int but as far as I've read it is always zero.
-        //
-        // My source of information: https://github.com/mirror/libX11/blob/master/src/ClDisplay.c#L73
-        const result = c.XCloseDisplay(self.ptr);
-        std.debug.assert(result == 0);
+        // https://github.com/mirror/libX11/blob/master/src/ClDisplay.c#L73
+        std.debug.assert(c.XCloseDisplay(self.ptr) == 0);
+    }
+
+    pub fn defaultScreenID(self: *const Self) ScreenID {
+        return c.zmenu_defaultscreen(self.ptr);
+    }
+
+    /// TODO: doc
+    ///
+    /// Window must not live longer than `self`.
+    pub fn rootWindow(self: *Self) Window {
+        const id = self.defaultScreenID();
+
+        return Window{
+            .display = self,
+            .screen_id = id,
+            .window_id = rootWindowID(self, id),
+        };
+
+        return c.zmenu_defaultscreen(self.ptr);
+    }
+
+    pub fn fromRawPtr(ptr: *c.Display) Self {
+        return Self{ .ptr = ptr };
     }
 };
 
-pub fn defaultScreenID(display: *const Display) ScreenID {
-    // return c.DefaultScreen(display.ptr);
-    return c.zmenu_defaultscreen(display.ptr);
+test "open and close display" {
+    var display = try Display.init(.{});
+    defer display.deinit();
 }
 
-pub fn rootWindowID(display: *const Display, screen_id: ScreenID) WindowID {
-    // return c.RootWindow(display.ptr, screen_id);
-    return c.zmenu_rootwindow(display.ptr, screen_id);
-}
-
-pub fn windowAttributes(display: *const Display, window_id: WindowID) ?WindowAttributes {
-    var wa: WindowAttributes = undefined;
-    const result = c.XGetWindowAttributes(display.ptr, window_id, &wa);
-
-    return if (result != 0) wa else null;
-}
-
-pub fn grabKeyboard(
+/// TODO: doc
+///
+/// This struct does not have init or deinit methods, as it does not need them.
+pub const Window = struct {
     display: *Display,
+    screen_id: ScreenID,
     window_id: WindowID,
-    options: struct {
-        const SyncOrAsync = enum {
+
+    pub fn attributes(self: *const Self) ?WindowAttributes {
+        var wa: WindowAttributes = undefined;
+        const result = c.XGetWindowAttributes(self.display.ptr, self.window_id, &wa);
+
+        return if (result != 0) wa else null;
+    }
+
+    pub const GrabKeyboadOptions = struct {
+        pub const SyncOrAsync = enum {
             Sync = 0,
             Async = 1,
         };
@@ -95,25 +106,57 @@ pub fn grabKeyboard(
         pointer_mode: SyncOrAsync,
         keyboard_mode: SyncOrAsync,
         time: Timestamp,
-    },
-) error{CouldNotGrabKeyboard}!void {
-    if (c.XGrabKeyboard(
-        display.ptr,
-        window_id,
-        @boolToInt(options.owner_events),
-        @enumToInt(options.pointer_mode),
-        @enumToInt(options.keyboard_mode),
-        options.time,
-    ) != c.GrabSuccess)
-        return error.CouldNotGrabKeyboard;
-}
+    };
+
+    pub const GrabKeyboardError = error{FailedToGrabKeyboard};
+
+    pub fn grabKeyboard(self: *Self, options: GrabKeyboadOptions) GrabKeyboardError!void {
+        if (c.XGrabKeyboard(
+            self.display.ptr,
+            self.display.window_id,
+            @boolToInt(options.owner_events),
+            @enumToInt(options.pointer_mode),
+            @enumToInt(options.keyboard_mode),
+            options.time,
+        ) != c.GrabSuccess)
+            return GrabKeyboardError.FailedToGrabKeyboard;
+    }
+
+    pub const ClassHints = struct {
+        name: ?[*:0]const u8,
+        class: ?[*:0]const u8,
+    };
+
+    /// The strings in `hints` do not need to live as long as `self` after this, since the memory is copied by X11.
+    pub fn setClassHints(self: *Self, hints: *const ClassHints) void {
+        // Crazy shenanigans so this can make sense.
+        // Does this have undefined behavior? I have no damn idea.
+        var hint_translation = c.XClassHint{
+            .res_name = violateConstCast([*c]u8, @ptrCast([*c]const u8, hints.name)),
+            .res_class = violateConstCast([*c]u8, @ptrCast([*c]const u8, hints.class)),
+        };
+
+        std.debug.assert(c.XSetClassHint(self.display.ptr, self.window_id, &hint_translation) == 1);
+    }
+
+    pub const InputEventMask = c_long;
+
+    pub fn selectInput(self: *Self, events: InputEventMask) void {
+        // TODO: turn `events` into a packed struct
+        std.debug.assert(c.XSelectInput(self.display.ptr, self.window_id, events) == 1);
+    }
+
+    pub fn setWindowBorderColor(self: *Self, color: *const Color) void {
+        std.debug.assert(c.XSetWindowBorder(self.display.ptr, self.window_id, color.pixel()) == 1);
+    }
+};
 
 pub const ResourceManager = struct {
+    database: c.XrmDatabase,
+
     const Self = @This();
 
     pub const InitError = error{NoXrmString};
-
-    database: c.XrmDatabase,
 
     /// NOTE: the returned resource manager
     pub fn init(display: *const Display) InitError!Self {
@@ -130,7 +173,8 @@ pub const ResourceManager = struct {
         c.XrmDestroyDatabase(self.database);
     }
 
-    // pub fn getResource(self: *const Self, resource_name: [:0]const u8) ?Resource {}
+    // TODO: pub fn getResource(self: *const Self, resource_name: [:0]const u8) ?Resource {}
+    // TODO: pub fn setResource(self: *Self, resource_name: [:0]const u8, resource: Resource) SetResourceError!void {}
 };
 
 pub const Color = struct {
@@ -138,30 +182,23 @@ pub const Color = struct {
 
     color: c.XftColor,
 
-    pub const InitError = error{CouldNotAllocateColor};
+    pub const ParseError = error{CouldNotAllocateColor};
 
-    pub fn pixel(self: *const Self) callconv(.Inline) c_ulong { // FIXME: remove inline, rename to getPixel
-        return self.color.pixel;
-    }
-
-    pub fn parse(
+    pub fn init(
         string: [*:0]const u8,
         display: *const Display,
         screen_id: ScreenID,
-    ) InitError!Self {
+    ) ParseError!Self {
         var self = Self{ .color = undefined };
-        const display_ptr = display.ptr;
 
         // FIXME: verify if this usage of XftColorAllocName is right
-        const result = c.XftColorAllocName(
-            display_ptr,
-            c.zmenu_defaultvisual(display_ptr, screen_id),
-            c.zmenu_defaultcolormap(display_ptr, screen_id),
+        return if (c.XftColorAllocName(
+            display.ptr,
+            c.zmenu_defaultvisual(display.ptr, screen_id),
+            c.zmenu_defaultcolormap(display.ptr, screen_id),
             string,
             &self.color,
-        );
-
-        return if (result == 0)
+        ) == 0)
             InitError.CouldNotAllocateColor
         else
             self;
@@ -170,19 +207,16 @@ pub const Color = struct {
     pub fn deinit(self: *Self) void { // FIXME: is this even being used?
         c.XftColorFree(&self.color); // FIXME: not sure if this is right either
     }
+
+    pub fn pixel(self: *const Self) c_ulong {
+        return self.color.pixel;
+    }
 };
-
-pub fn hasLocaleSupport() bool {
-    if (c.setlocale(c.LC_CTYPE, "") == null) return false;
-    if (c.XSupportsLocale() != 1) return false;
-
-    return true;
-}
 
 pub const Font = struct {
     const Self = @This();
 
-    triplet: *const WindowTriplet,
+    display_ptr: *const Display,
     font: *c.XftFont,
     pattern: ?*c.FcPattern,
 
@@ -197,17 +231,17 @@ pub const Font = struct {
         CouldNotParseFontName,
     }; // FIXME: are CouldNotLoadFont and CouldNotParseFontName right names?
 
-    pub fn init(resource: FontResource, triplet: *const WindowTriplet) Error!Self {
+    pub fn init(resource: FontResource, window: *const Window) Error!Self {
         var pattern: ?*c.FcPattern = null;
 
         const font = switch (resource) {
             .Name => |name| blk: {
                 const xft_font = c.XftFontOpenName(
-                    triplet.display.ptr,
-                    triplet.screen_id,
+                    window.display.ptr,
+                    window.screen_id,
                     name,
                 ) orelse return Error.CouldNotLoadFont;
-                errdefer c.XftFontClose(triplet.display.ptr, xft_font);
+                errdefer c.XftFontClose(window.display.ptr, xft_font);
 
                 // There's a pattern pointer at `xft_font.*.pattern` but it doesn't necessarily yield the same results
                 // as the ones FcNameParse does.
@@ -219,11 +253,9 @@ pub const Font = struct {
 
                 break :blk xft_font;
             },
-            .Pattern => |patt| blk: {
-                break :blk c.XftFontOpenPattern(triplet.display.ptr, patt) orelse return Error.CouldNotLoadFont;
-            },
+            .Pattern => |patt| c.XftFontOpenPattern(window.display.ptr, patt) orelse return Error.CouldNotLoadFont,
         };
-        errdefer c.XftFontClose(triplet.display.ptr, font);
+        errdefer c.XftFontClose(window.display.ptr, font);
 
         // This block below is a workaround modelled around Xterm's one, which disallows using color fonts so Xft
         // doesn't throw a BadLength error with color glyphs.
@@ -240,7 +272,7 @@ pub const Font = struct {
         }
 
         return Self{
-            .triplet = triplet,
+            .display_ptr = window.display.ptr,
             .pattern = pattern,
             .font = font,
         };
@@ -250,10 +282,10 @@ pub const Font = struct {
         if (self.pattern) |patt|
             c.FcPatternDestroy(patt);
 
-        c.XftFontClose(self.triplet.display.ptr, self.font);
+        c.XftFontClose(self.display_ptr, self.font);
     }
 
-    pub fn height(self: *const Self) callconv(.Inline) usize {
+    pub fn height(self: *const Self) usize {
         return @intCast(usize, self.font.*.ascent + self.font.*.descent);
     }
 };
@@ -263,14 +295,13 @@ pub const Fontset = struct {
 
     fonts: ArrayList(Font),
     allocator: *Allocator,
-    triplet: *const WindowTriplet,
 
     pub const Error = Font.Error || error{NoFont};
 
     pub fn init(
         font_names: []const [:0]const u8,
         allocator: *Allocator,
-        triplet: *const WindowTriplet,
+        window: *const Window,
     ) (Error || Allocator.Error)!Self {
         var fonts = ArrayList(Font).init(allocator);
         errdefer {
@@ -279,7 +310,7 @@ pub const Fontset = struct {
         }
 
         for (font_names) |fname| { // TODO: reserve at least a little bit of space
-            var font = Font.init(.{ .Name = fname }, triplet) catch |err| switch (err) {
+            var font = Font.init(.{ .Name = fname }, window) catch |err| switch (err) {
                 Font.Error.SkipFontLoad => continue,
                 else => return err,
             };
@@ -293,7 +324,6 @@ pub const Fontset = struct {
 
         return Self{
             .fonts = fonts,
-            .triplet = triplet,
             .allocator = allocator,
         };
     }
@@ -312,33 +342,26 @@ pub const Fontset = struct {
 
 pub const Pixmap = @compileError("TODO");
 
-pub const InputEventMask = c_long;
-
 pub const input_events = struct {
     pub const focus_change = c.FocusChangeMask;
     pub const substructure_notify = c.SubstructureNotifyMask;
 };
 
-pub fn selectInput(display: *Display, window_id: WindowID, events: InputEventMask) void {
-    // TODO: turn `events` into a packed struct
-    std.debug.assert(c.XSelectInput(
-        display.ptr,
-        window_id,
-        events,
-    ) == 1);
-}
+pub const internal = struct {
+    pub fn freeResource(resource: *c_void) void {
+        // XFree seems to always return 1. It doesn't even seem to throw any X error.
+        std.debug.assert(c.XFree(resource) == 1);
+    }
 
-pub fn setWindowBorderColor(display: *Display, window_id: WindowID, color: *const Color) void {
-    std.debug.assert(c.XSetWindowBorder(display.ptr, window_id, color.pixel()) == 1);
-}
+    pub fn freePixmap(display: *Display, pixmap: PixmapID) void {
+        std.debug.assert(c.XFreePixmap(display.ptr, pixmap) == 1);
+    }
 
-pub const ClassHints = c.XClassHint;
+    pub fn freeGraphicalContext(display: *Display, pixmap: GraphicalContext) void {
+        std.debug.assert(c.XFreeGC(display.ptr, pixmap) == 1);
+    }
+};
 
-pub fn setClassHint(display: *Display, window_id: WindowID, hints: *ClassHints) void { // FIXME: should `hints` be `*` or `*const`?
-    std.debug.assert(c.XSetClassHint(display.ptr, window_id, hints) == 1);
-}
-
-test "open and close display" {
-    var display = try Display.init();
-    defer display.deinit();
+fn violateConstCast(comptime UnderlyingType: type, ptr: *const UnderlyingType) *UnderlyingType {
+    return @intToPtr(UnderlyingType, @ptrToInt(ptr));
 }

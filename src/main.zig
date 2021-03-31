@@ -48,7 +48,7 @@ test "entry point" {
     _ = std.testing.refAllDecls(@This());
 }
 
-pub fn main() anyerror!u8 {
+pub fn main() anyerror!u8 { // FIXME: `anyerror` shouldn't be used here in a final build
     switch (std.Target.current.os.tag) {
         .linux => {},
         .openbsd => {
@@ -83,28 +83,56 @@ pub fn main() anyerror!u8 {
     const args = try std.process.argsAlloc(&gpa.allocator);
     defer std.process.argsFree(&gpa.allocator, args); // we're only gonna do this at the end of the program, so we can use the arg strings freely here.
 
-    const cfg = switch (parseArgs(&user_config.cfg, args)) {
-        .NotEnoughArgs => {
-            std.debug.print("error: could not get program name (arg #0 missing)\n", .{});
-            return 1;
-        },
-        .Success => |cfg| cfg,
-        .ExitSuccess => return 0,
-        .ExitFailure => return 1,
+    var program = Program.init(&gpa.allocator, &args, &user_config.cfg,) catch |err| switch (err) {
+        error.ExitSuccess => return 0,
+        error.ExitFailure => return 1,
+        else => return err,
     };
+    defer program.deinit();
+}
 
-    if (!xorg.hasLocaleSupport()) {
-        std.debug.print("warning: no locale support\n", .{});
+pub const Program = struct {
+    allocator: *Allocator,
+    args: []const [:0]const u8,
+    log_output: *Writer,
+    display: Display,
+    root_win: Window,
+
+    pub fn init(allocator: *Allocator, args: []const [:0]const u8, config: *const BaseConfig, log_output: *Writer) !Self {
+        const config = switch (generateConfig(args, config)) {
+            .not_enough_args => {
+                std.debug.print("error: could not get program name (arg #0 missing)\n", .{});
+                return 1;
+            },
+            .success => |cfg| cfg,
+            .exit_success => return error.ExitSuccess,
+            .exit_failure => return error.ExitFailure,
+        };
+
+        if (!xorg.hasLocaleSupport()) {
+            log_output.print("warning: no locale support\n", .{});
+        }
+
+        var display = try Display.init(.{});
+        errdefer display.deinit();
+
+        const root_win = display.rootWindow();
+
+        return Self{
+            .config = config,
+            .allocator = allocator,
+            .args = args,
+            .display = display,
+            .root_win = root_win,
+        };
     }
 
-    var display = Display.init() catch |err| switch (err) {
-        error.OpenDisplayError => {
-            std.debug.print("error: could not open display\n", .{});
-            return 1;
-        },
-    };
-    defer display.deinit();
+    pub fn deinit(self: *Self) void {
+        self.display.deinit();
+    }
+};
 
+pub fn main() anyerror!u8 {
     const root_triplet = blk: {
         const screen_id = xorg.defaultScreenID(&display);
 
@@ -559,7 +587,7 @@ const ParseResult = union(enum) {
     ExitFailure: void,
 };
 
-fn parseArgs(base: *const Config, args: []const [:0]const u8) ParseResult {
+fn makeConfig(args: []const [:0]const u8, base: *const Config) ParseResult {
     const program_name = if (args.len > 0)
         args[0]
     else
