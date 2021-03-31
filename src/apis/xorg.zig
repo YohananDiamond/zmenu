@@ -20,10 +20,6 @@ pub const none: WindowID = c.None;
 
 pub const defaultScreenID = @compileError("This function deprecated - use Display.defaultScreenID instead");
 
-pub fn rootWindowID(display: *const Display, screen_id: ScreenID) WindowID {
-    return c.zmenu_rootwindow(display.ptr, screen_id);
-}
-
 pub fn hasLocaleSupport() bool {
     if (c.setlocale(c.LC_CTYPE, "") == null) return false;
     if (c.XSupportsLocale() != 1) return false;
@@ -52,25 +48,34 @@ pub const Display = struct {
         std.debug.assert(c.XCloseDisplay(self.ptr) == 0);
     }
 
+    /// TODO: doc
     pub fn defaultScreenID(self: *const Self) ScreenID {
         return c.zmenu_defaultscreen(self.ptr);
+    }
+
+    /// TODO: doc
+    pub fn rootWindowID(self: *const Self, screen_id: ScreenID) WindowID {
+        return c.zmenu_rootwindow(display.ptr, screen_id);
+    }
+
+    /// TODO: doc
+    pub fn rootWindowOf(self: *const Self, screen_id: ScreenID) WindowID {
+        return Window{
+            .display = self,
+            .screen_id = id,
+            .window_id = self.rootWindowID(screen_id),
+        };
     }
 
     /// TODO: doc
     ///
     /// Window must not live longer than `self`.
     pub fn rootWindow(self: *Self) Window {
-        const id = self.defaultScreenID();
-
-        return Window{
-            .display = self,
-            .screen_id = id,
-            .window_id = rootWindowID(self, id),
-        };
-
-        return c.zmenu_defaultscreen(self.ptr);
+        const default_screen = self.defaultScreenID();
+        return self.rootWindowOf(default_screen);
     }
 
+    /// Initialize a display from a raw X display pointer.
     pub fn fromRawPtr(ptr: *c.Display) Self {
         return Self{ .ptr = ptr };
     }
@@ -158,7 +163,6 @@ pub const ResourceManager = struct {
 
     pub const InitError = error{NoXrmString};
 
-    /// NOTE: the returned resource manager
     pub fn init(display: *const Display) InitError!Self {
         c.XrmInitialize();
 

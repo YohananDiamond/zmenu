@@ -10,6 +10,8 @@ const File = std.fs.File;
 const math = std.math;
 
 const draw = @import("draw.zig");
+const DrawControl = draw.DrawControl;
+
 const Point2 = @import("point.zig").Point2;
 
 const apis = @import("apis.zig");
@@ -83,7 +85,7 @@ pub fn main() anyerror!u8 { // FIXME: `anyerror` shouldn't be used here in a fin
     const args = try std.process.argsAlloc(&gpa.allocator);
     defer std.process.argsFree(&gpa.allocator, args); // we're only gonna do this at the end of the program, so we can use the arg strings freely here.
 
-    var program = Program.init(&gpa.allocator, &args, &user_config.cfg,) catch |err| switch (err) {
+    var program = Program.init(&gpa.allocator, &args, &user_config.cfg) catch |err| switch (err) {
         error.ExitSuccess => return 0,
         error.ExitFailure => return 1,
         else => return err,
@@ -99,6 +101,8 @@ pub const Program = struct {
     root_win: Window,
 
     pub fn init(allocator: *Allocator, args: []const [:0]const u8, config: *const BaseConfig, log_output: *Writer) !Self {
+        // FIXME: Holy shit a lot of shit here is pointing to stack memory, I'm dummy
+
         const config = switch (generateConfig(args, config)) {
             .not_enough_args => {
                 std.debug.print("error: could not get program name (arg #0 missing)\n", .{});
@@ -113,107 +117,68 @@ pub const Program = struct {
             log_output.print("warning: no locale support\n", .{});
         }
 
-        var display = try Display.init(.{});
-        errdefer display.deinit();
+        var main_display = try Display.init(.{});
+        errdefer main_display.deinit();
 
-        const root_win = display.rootWindow();
+        const default_screen = display.defaultScreenID();
+        const root_win = display.rootWindowOf(default_screen);
 
-        return Self{
-            .config = config,
-            .allocator = allocator,
-            .args = args,
-            .display = display,
-            .root_win = root_win,
-        };
-    }
+        const target_win = if (config.parent_window) |parent_win|
+            Window{
+                .display = root_win.display,
+                .screen = default_screen,
+                .window_id = parent_win,
+            } // FIXME: is this guaranteed to be on the same screen?
+        else
+            root_win;
 
-    pub fn deinit(self: *Self) void {
-        self.display.deinit();
-    }
-};
+        if (ResourceManager.init(&root_win.display)) |*res_man| {
+            // TODO: load resources here
+            // TODO: make it so the resources loaded here don't necessarily override command-line options
 
-pub fn main() anyerror!u8 {
-    const root_triplet = blk: {
-        const screen_id = xorg.defaultScreenID(&display);
-
-        break :blk WindowTriplet{
-            .display = &display,
-            .screen_id = screen_id,
-            .window_id = xorg.rootWindowID(&display, screen_id),
-        };
-    };
-
-    const target_win = if (cfg.parent_window) |pw|
-        @intCast(WindowID, pw)
-    else
-        root_triplet.window_id;
-
-    const target_win_attr = xorg.windowAttributes(&display, target_win) orelse {
-        std.debug.print("error: could not get attributes of target window ({d} a.k.a. 0x{X})\n", .{ target_win, target_win });
-        return 1;
-    };
-
-    if (ResourceManager.init(&display)) |*resource_manager| {
-        defer resource_manager.deinit();
-
-        // TODO: make it so that Xresources don't necessarily override command-line options
-    } else |err| switch (err) {
-        error.NoXrmString => {
-            std.debug.print("warning: failed to load X resources - using default settings\n", .{});
-        },
-    }
-
-    var kb_grab_state: enum { NotGrabbed, Embed, Grabbed } = if (cfg.is_embed)
-        .Embed
-    else
-        .NotGrabbed;
-
-    if (kb_grab_state == .NotGrabbed and cfg.grab_kb == .Early and !std.os.isatty(0)) {
-        attemptGrabKeyboard(&display, target_win) catch |err| switch (err) {
-            error.CouldNotGrabKeyboard => {
-                std.debug.print("error: failed to grab keyboard\n", .{});
-                return 1;
+            defer res_man.deinit();
+        } else |err| switch (err) {
+            error.NoXrmString => {
+                log_output.print("warning: failed to load X resources - using default settings\n", .{});
             },
+        }
+
+        const lines = blk: {
+            const KbGrabState = enum { NotGrabbed, Embed, Grabbed };
+
+            var grab_state: KbGrabState = if (config.is_embed) .Embed else .NotGrabbed;
+
+            if (grab_state == .NotGrabbed and config.grab_kb == .Early and !std.os.isatty(0)) {
+                try attemptGrabKeyboard(&target_win);
+                grab_state = .Grabbed;
+            }
+
+            var lines = ArrayList(ArrayList(u8)).init(allocator);
+            errdefer {
+                for (lines.items) |*line|
+                    line.deinit();
+
+                lines.deinit();
+            }
+
+            var stdin = std.io.getStdIn();
+            readLines(4096, &lines, allocator, stdin) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                // => return error.FailedToReadFromStdin,
+            };
+
+            // Remove last empty line, if any
+            if (lines.items.len > 0 and lines.items[lines.items.len - 1].items.len == 0) {
+                _ = lines.pop();
+            }
+
+            if (kb_grab_state == .NotGrabbed) {
+                try attemptGrabKeyboard(&display, target_win);
+            }
+
+            break :blk lines;
         };
 
-        kb_grab_state = .Grabbed;
-    }
-
-    var lines = ArrayList(ArrayList(u8)).init(&gpa.allocator);
-    defer {
-        for (lines.items) |*line|
-            line.deinit();
-
-        lines.deinit();
-    }
-
-    var stdin = std.io.getStdIn();
-    readLines(2048, &lines, &gpa.allocator, stdin) catch |err| switch (err) {
-        error.OutOfMemory => {
-            std.debug.print("Failed to allocate memory\n", .{});
-            return 1;
-        },
-        else => {
-            std.debug.print("Failed to read from stdin: {}\n", .{err});
-            return 1;
-        },
-    };
-
-    // Remove last empty line, if any
-    if (lines.items.len > 0 and lines.items[lines.items.len - 1].items.len == 0) {
-        _ = lines.pop();
-    }
-
-    if (kb_grab_state == .NotGrabbed and cfg.grab_kb == .Late) {
-        attemptGrabKeyboard(&display, target_win) catch |err| switch (err) {
-            error.CouldNotGrabKeyboard => {
-                std.debug.print("error: failed to grab keyboard\n", .{});
-                return 1;
-            },
-        };
-    }
-
-    {
         const schemes = blk: {
             var scm: SchemeSet = undefined;
 
@@ -223,13 +188,13 @@ pub fn main() anyerror!u8 {
                 "sel",
                 "sel_highlight",
                 "out",
-            };
+            }; // FIXME: this might cause chaos if a new field is added and I forget to list it here
 
             inline for (fields) |name| {
                 @field(scm, name) = SchemeColors.initFromSchemeStrings(
                     &@field(cfg.default_resources, name),
-                    root_triplet.display,
-                    root_triplet.screen_id,
+                    root_win.display,
+                    root_win.screen_id,
                     true,
                 ) catch |err| switch (err) {
                     error.CouldNotAllocateColor => return 1,
@@ -239,19 +204,49 @@ pub fn main() anyerror!u8 {
             break :blk scm;
         };
 
-        var fontset = try Fontset.init(cfg.default_resources.fonts, &gpa.allocator, &root_triplet); // TODO: consider `main_font`
-        defer fontset.deinit();
+        // TODO: consider `main_font`
+        // FIXME: should this be `root_win` or `target_win`?
+        var fontset = try Fontset.init(config.resources.fonts, allocator, &root_win);
+        errdefer font.deinit();
 
-        var drawctl = draw.DrawControl.init(
-            &root_triplet,
+        var draw_control = DrawControl.init(
+            &root_win, // FIXME: is this the right window?
             Point2(u32){
                 .x = @intCast(u32, target_win_attr.width),
                 .y = @intCast(u32, target_win_attr.height),
             },
-            &fontset,
+            try Fontset.init(config.resources.fonts, allocator, &root_win),
         );
-        defer drawctl.deinit();
+        @compileError("I am in pain");
+        errdefer drawctl.deinit();
 
+        return Self{
+            .config = config,
+            .allocator = allocator,
+            .args = args,
+            .main_display = main_display,
+            .root_win = root_win,
+            .lines = lines,
+            .draw_control = draw_control,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.display.deinit();
+
+        for (lines.items) |*line|
+            line.deinit();
+        lines.deinit();
+    }
+};
+
+pub fn main() anyerror!u8 {
+    const target_win_attr = xorg.windowAttributes(&display, target_win) orelse {
+        std.debug.print("error: could not get attributes of target window ({d} a.k.a. 0x{X})\n", .{ target_win, target_win });
+        return 1;
+    };
+
+    {
         // Calculate menu geometry
         const line_height = fontset.fonts.items[0].height() + 2; // FIXME: does this handle backup fonts? I'm not even sure if dmenu handles backup fonts...
         const menu_height = (cfg.lines + 1) * line_height;
@@ -462,18 +457,21 @@ pub fn main() anyerror!u8 {
         xorg.setWindowBorderColor(root_triplet.display, menu_win, &schemes.sel.bg);
 
         // Just to be sure...
-        const zmenu_name_ref: [:0]const u8 = "zmenu";
-        var zmenu_name_alloc: []u8 = try gpa.allocator.alloc(u8, zmenu_name_ref.len + 1);
-        defer gpa.allocator.free(zmenu_name_alloc);
-        std.mem.copy(u8, zmenu_name_alloc, zmenu_name_ref);
-        zmenu_name_alloc[zmenu_name_alloc.len - 1] = 0;
+        // const zmenu_name_ref: [:0]const u8 = "zmenu";
+        // var zmenu_name_alloc: []u8 = try gpa.allocator.alloc(u8, zmenu_name_ref.len + 1);
+        // defer gpa.allocator.free(zmenu_name_alloc);
+        // std.mem.copy(u8, zmenu_name_alloc, zmenu_name_ref);
+        // zmenu_name_alloc[zmenu_name_alloc.len - 1] = 0;
 
-        var hint = xorg.ClassHints{
-            .res_name = @ptrCast([*c]u8, zmenu_name_alloc),
-            .res_class = @ptrCast([*c]u8, zmenu_name_alloc),
-        };
+        // var hint = xorg.ClassHints{
+        //     .res_name = @ptrCast([*c]u8, zmenu_name_alloc),
+        //     .res_class = @ptrCast([*c]u8, zmenu_name_alloc),
+        // };
 
-        xorg.setClassHint(root_triplet.display, menu_win, &hint);
+        menu_win.setClassHint(&.{
+            .name = "zmenu",
+            .class = "zmenu",
+        });
 
         const xim: c.XIM = c.XOpenIM(root_triplet.display.ptr, null, null, null) orelse {
             std.debug.print("error: XOpenIM: could not open input device\n", .{});
