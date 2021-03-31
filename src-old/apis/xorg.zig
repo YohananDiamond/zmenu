@@ -27,47 +27,6 @@ pub fn hasLocaleSupport() bool {
     return true;
 }
 
-pub const Display = struct {
-    ptr: *c.Display,
-
-    /// TODO: doc
-    pub fn defaultScreenID(self: *const Self) ScreenID {
-        return c.zmenu_defaultscreen(self.ptr);
-    }
-
-    /// TODO: doc
-    pub fn rootWindowID(self: *const Self, screen_id: ScreenID) WindowID {
-        return c.zmenu_rootwindow(display.ptr, screen_id);
-    }
-
-    /// TODO: doc
-    pub fn rootWindowOf(self: *const Self, screen_id: ScreenID) WindowID {
-        return Window{
-            .display = self,
-            .screen_id = id,
-            .window_id = self.rootWindowID(screen_id),
-        };
-    }
-
-    /// TODO: doc
-    ///
-    /// Window must not live longer than `self`.
-    pub fn rootWindow(self: *Self) Window {
-        const default_screen = self.defaultScreenID();
-        return self.rootWindowOf(default_screen);
-    }
-
-    /// Initialize a display from a raw X display pointer.
-    pub fn fromRawPtr(ptr: *c.Display) Self {
-        return Self{ .ptr = ptr };
-    }
-};
-
-test "open and close display" {
-    var display = try Display.init(.{});
-    defer display.deinit();
-}
-
 /// TODO: doc
 ///
 /// This struct does not have init or deinit methods, as it does not need them.
@@ -136,31 +95,6 @@ pub const Window = struct {
     pub fn setWindowBorderColor(self: *Self, color: *const Color) void {
         std.debug.assert(c.XSetWindowBorder(self.display.ptr, self.window_id, color.pixel()) == 1);
     }
-};
-
-pub const ResourceManager = struct {
-    database: c.XrmDatabase,
-
-    const Self = @This();
-
-    pub const InitError = error{NoXrmString};
-
-    pub fn init(display: *const Display) InitError!Self {
-        c.XrmInitialize();
-
-        const xrm_string = c.XResourceManagerString(display.ptr) orelse return InitError.NoXrmString;
-
-        return Self{
-            .database = c.XrmGetStringDatabase(xrm_string) orelse unreachable,
-        };
-    }
-
-    pub fn deinit(self: *Self) void {
-        c.XrmDestroyDatabase(self.database);
-    }
-
-    // TODO: pub fn getResource(self: *const Self, resource_name: [:0]const u8) ?Resource {}
-    // TODO: pub fn setResource(self: *Self, resource_name: [:0]const u8, resource: Resource) SetResourceError!void {}
 };
 
 pub const Color = struct {

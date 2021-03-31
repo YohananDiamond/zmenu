@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const c = @import("internal.zig");
+const c = @import("bindings.zig");
 
 /// The underlying type for the display.
 ///
