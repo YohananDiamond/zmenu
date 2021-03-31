@@ -30,24 +30,6 @@ pub fn hasLocaleSupport() bool {
 pub const Display = struct {
     ptr: *c.Display,
 
-    const Self = @This();
-
-    pub const OpenError = error{FailedToOpenDisplay};
-
-    pub const InitOptions = struct {
-        display_name: ?[:0]const u8 = null,
-    };
-
-    pub fn init(options: InitOptions) OpenError!Self {
-        return Self{ .ptr = c.XOpenDisplay(null) orelse return OpenError.FailedToOpenDisplay };
-    }
-
-    pub fn deinit(self: *Self) void {
-        // XCloseDisplay actually returns a c_int but as far as I've read it is always zero.
-        // https://github.com/mirror/libX11/blob/master/src/ClDisplay.c#L73
-        std.debug.assert(c.XCloseDisplay(self.ptr) == 0);
-    }
-
     /// TODO: doc
     pub fn defaultScreenID(self: *const Self) ScreenID {
         return c.zmenu_defaultscreen(self.ptr);

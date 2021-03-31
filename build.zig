@@ -1,4 +1,5 @@
 const std = @import("std");
+const Pkg = std.build.Pkg;
 
 const config = .{
     .use_xinerama = true,
@@ -34,12 +35,18 @@ pub fn build(b: *std.build.Builder) void {
 
     // Testing configuration
     {
-        const tests = b.addTest("src/main.zig");
-
-        configureStep(tests, target, mode);
+        const test_roots = &[_][]const u8{
+            "src/main.zig",
+            "x11/x11.zig",
+        };
 
         const test_step = b.step("test", "Test the app");
-        test_step.dependOn(&tests.step);
+
+        for (test_roots) |test_root| {
+            const test_ = b.addTest(test_root);
+            configureStep(test_, target, mode);
+            test_step.dependOn(&test_.step);
+        }
     }
 }
 
@@ -57,12 +64,21 @@ fn configureStep(
     step.setTarget(target);
     step.setBuildMode(mode);
 
-    step.linkSystemLibrary("c");
-    step.linkSystemLibrary("X11");
-    step.linkSystemLibrary("Xft");
-    step.linkSystemLibrary("fontconfig");
+    {
+        // X11 Package
+        step.addPackage(Pkg{
+            .name = "x11",
+            .path = "x11/x11.zig",
+        });
 
-    const c_flags = &[_][]const u8{"-std=c99"};
-    step.addIncludeDir("src/c_impl");
-    step.addCSourceFile("src/c_impl/zmenu_xlib.c", c_flags);
+        step.addIncludeDir("x11");
+        step.addCSourceFile("x11/funcs.c", &.{"-std=c99"});
+
+        step.linkSystemLibrary("c");
+        step.linkSystemLibrary("X11");
+    }
+
+    // step.linkSystemLibrary("Xft");
+    // step.linkSystemLibrary("fontconfig");
+
 }
