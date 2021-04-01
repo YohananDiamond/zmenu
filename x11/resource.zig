@@ -74,6 +74,8 @@ test "ResourceManager.getResource" {
 }
 
 test "ResourceManager.setResource" {
+    // NOTE: setting and then getting the value from the resource manager is susceptible to data races.
+
     var display = try x11.Display.init(null);
     defer display.deinit();
 
@@ -85,6 +87,40 @@ test "ResourceManager.setResource" {
     testing.expect(std.mem.eql(
         u8,
         "Hello, World!",
+        resource_manager.getResource("__resourceManagerTest.value", null).?.value,
+    ));
+}
+
+test "ResourceManager.setResource copies value memory" {
+    // NOTE: setting and then getting the value from the resource manager is susceptible to data races.
+
+    var display = try x11.Display.init(null);
+    defer display.deinit();
+
+    var resource_manager = try x11.resource.ResourceManager.init(display.asRef());
+    defer resource_manager.deinit();
+
+    const static_string: []const u8 = "12345" ++ &[_]u8{0};
+
+    // Allocate memory and set the string
+    var data: []u8 = try testing.allocator.alloc(u8, static_string.len);
+    defer testing.allocator.free(data);
+    std.mem.copy(u8, data, static_string);
+
+    // Set the resource value.
+    // This should copy the memory instead of just pointing to it.
+    const data_as_sentinel: [:0]const u8 = std.meta.assumeSentinel(data, 0);
+    resource_manager.setResource("__resourceManagerTest.value", .{ .value = data_as_sentinel });
+
+    // Clean up the allocated memory (do not deallocate it yet)
+    std.mem.copy(u8, data, "somet" ++ &[_]u8{0});
+
+    // If what we want is true, `data_as_sentinel`, which is now "somet", should be different from the value returned
+    // from the data returned by resource_manager.getResource, since the resource manager is expected to copy the data
+    // passed to setResource.
+    testing.expect(!std.mem.eql(
+        u8,
+        data_as_sentinel,
         resource_manager.getResource("__resourceManagerTest.value", null).?.value,
     ));
 }
