@@ -1,4 +1,6 @@
-**zmenu_\1* - it's dmenu, but in Zig!
+**zmenu - it's dmenu, but in Zig!**
+
+(Currently in halt)
 
 Beware that this code is incomplete and experimental in itself, and
 might not even compile. On top of that, Zig is currently also on a very
