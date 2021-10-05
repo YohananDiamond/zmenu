@@ -55,6 +55,11 @@ fn configureStep(
     target: anytype, // FIXME: how do I describe this type
     mode: std.builtin.Mode,
 ) void {
+    const gmath_pkg = Pkg{
+        .name = "gmath",
+        .path = "gmath/gmath.zig",
+    };
+
     step.addBuildOption(bool, "use_xinerama", config.use_xinerama);
 
     if (config.use_xinerama) {
@@ -69,6 +74,7 @@ fn configureStep(
         step.addPackage(Pkg{
             .name = "x11",
             .path = "x11/x11.zig",
+            .dependencies = &.{gmath_pkg},
         });
 
         step.addIncludeDir("x11");
@@ -76,6 +82,12 @@ fn configureStep(
 
         step.linkSystemLibrary("c");
         step.linkSystemLibrary("X11");
+    }
+
+    {
+        // gMath Package
+        // TODO: why the "g"?
+        step.addPackage(gmath_pkg);
     }
 
     // step.linkSystemLibrary("Xft");

@@ -1,7 +1,67 @@
 const std = @import("std");
 const testing = std.testing;
 
+const x11 = @import("x11.zig");
 const c = @import("bindings.zig");
+
+pub const Event = c.XEvent;
+
+/// Definitions optained from X.h
+pub const event_types = struct {
+    pub const key_press = c.KeyPress;
+    pub const key_release = c.KeyRelease;
+    pub const button_press = c.ButtonPress;
+    pub const button_release = c.ButtonRelease;
+    pub const motion_notify = c.MotionNotify;
+    pub const enter_notify = c.EnterNotify;
+    pub const leave_notify = c.LeaveNotify;
+    pub const focus_in = c.FocusIn;
+    pub const focus_out = c.FocusOut;
+    pub const keymap_notify = c.KeymapNotify;
+    pub const expose = c.Expose;
+    pub const graphics_expose = c.GraphicsExpose;
+    pub const no_expose = c.NoExpose;
+    pub const visibility_notify = c.VisibilityNotify;
+    pub const create_notify = c.CreateNotify;
+    pub const destroy_notify = c.DestroyNotify;
+    pub const unmap_notify = c.UnmapNotify;
+    pub const map_notify = c.MapNotify;
+    pub const map_request = c.MapRequest;
+    pub const reparent_notify = c.ReparentNotify;
+    pub const configure_notify = c.ConfigureNotify;
+    pub const configure_request = c.ConfigureRequest;
+    pub const gravity_notify = c.GravityNotify;
+    pub const resize_request = c.ResizeRequest;
+    pub const circulate_notify = c.CirculateNotify;
+    pub const circulate_request = c.CirculateRequest;
+    pub const property_notify = c.PropertyNotify;
+    pub const selection_clear = c.SelectionClear;
+    pub const selection_request = c.SelectionRequest;
+    pub const selection_notify = c.SelectionNotify;
+    pub const colormap_notify = c.ColormapNotify;
+    pub const client_message = c.ClientMessage;
+    pub const mapping_notify = c.MappingNotify;
+    pub const generic_event = c.GenericEvent;
+    pub const last_event = c.LASTEvent;
+};
+
+/// TODO: doc
+pub const EventIterator = struct {
+    /// TODO: doc
+    _display_ptr: *InternalDisplay,
+
+    const Self = @This();
+
+    pub fn next(self: *Self) ?Event {
+        var ev: Event = undefined;
+        _ = c.XNextEvent(self._display_ptr, &ev);
+
+        return ev;
+    }
+};
+
+const gmath = @import("gmath");
+const Rect2 = gmath.Rect2;
 
 /// The internal X display struct.
 ///
@@ -80,6 +140,21 @@ pub const DisplayRef = struct {
     pub fn defaultScreenID(self: Self) ScreenID {
         return c.x11_defaultscreen(self._ptr);
     }
+
+    /// TODO: doc
+    ///
+    /// The user is responsible for deciding whether this screen ID is valid.
+    pub fn withScreenID(self: Self, screen_id: ScreenID) ScreenRef {
+        return ScreenRef{
+            ._display_ptr = self._ptr,
+            ._screen_id = screen_id,
+        };
+    }
+
+    /// TODO: doc
+    pub fn eventIterator(self: Self) EventIterator {
+        return EventIterator{ ._display_ptr = self._ptr };
+    }
 };
 
 test "get the default screen of a display" {
@@ -132,6 +207,17 @@ pub const ScreenRef = struct {
     pub fn rootWindowID(self: Self) WindowID {
         return c.x11_rootwindow(self._display_ptr, self._screen_id);
     }
+
+    /// TODO: doc
+    ///
+    /// The user is responsible for deciding whether this window ID is valid.
+    pub fn withWindowID(self: Self, window_id: WindowID) WindowRef {
+        return WindowRef{
+            ._display_ptr = self._display_ptr,
+            ._screen_id = self._screen_id,
+            ._window_id = window_id,
+        };
+    }
 };
 
 test "get the root window of a display" {
@@ -141,6 +227,13 @@ test "get the root window of a display" {
     var screen = display.asRef().defaultScreen();
 
     testing.expect(screen.rootWindow()._window_id == screen.rootWindowID());
+}
+
+test "arbritrary window and screen" {
+    var display = try Display.init(null);
+    defer display.deinit();
+
+    _ = display.asRef().withScreenID(undefined).withWindowID(undefined);
 }
 
 /// The ID of an X Window.
@@ -160,4 +253,100 @@ pub const WindowRef = struct {
     _screen_id: ScreenID,
     /// The ID of this window.
     _window_id: WindowID,
+
+    const Self = @This();
+
+    pub const Class = enum(u32) {
+        input_output = c.InputOutput,
+        input_only = c.InputOnly,
+        copy_from_parent = c.CopyFromParent,
+    };
+
+    pub fn createSubWindow(
+        self: Self,
+        geometry: Rect2(i32, u32),
+        config: struct {
+            border_width: u32 = x11.special.copy_from_parent,
+            depth: i32 = x11.special.copy_from_parent,
+            class: Class = .copy_from_parent,
+            visual: [*c]c.Visual = @intToPtr([*c]c.Visual, x11.special.copy_from_parent), // FIXME: make this better
+            attributes: *const SetWindowAttributes = &.{},
+        },
+    ) ManagedWindowRef {
+        var raw_attr = config.attributes.toRawAttr();
+
+        const win_id = c.XCreateWindow(
+            self._display_ptr,
+            self._window_id,
+            @as(c_int, geometry.x),
+            @as(c_int, geometry.y),
+            @as(c_uint, geometry.w),
+            @as(c_uint, geometry.h),
+            @as(c_uint, config.border_width),
+            @as(c_int, config.depth),
+            @enumToInt(config.class),
+            config.visual,
+            raw_attr.value_mask,
+            &raw_attr.attrs,
+        );
+
+        return ManagedWindowRef{ .ref = WindowRef{
+            ._display_ptr = self._display_ptr,
+            ._screen_id = self._screen_id,
+            ._window_id = win_id,
+        } };
+    }
+
+    pub fn mapToScreen(self: Self) void {
+        _ = c.XMapWindow(self._display_ptr, self._window_id);
+    }
+};
+
+pub const RawSetWindowAttributes = c.XSetWindowAttributes;
+
+pub const SetWindowAttributes = struct {
+    override_redirect: ?bool = null,
+    background_pixel: ?x11.draw.Pixel = null,
+    event_mask: ?c_long = null,
+
+    const Self = @This();
+
+    pub const RawAttrPair = struct {
+        value_mask: c_ulong,
+        attrs: RawSetWindowAttributes,
+    };
+
+    pub fn toRawAttr(self: *const Self) RawAttrPair {
+        var result = RawAttrPair{
+            .value_mask = 0,
+            .attrs = undefined,
+        };
+
+        if (self.override_redirect) |ovr| {
+            result.value_mask |= c.CWOverrideRedirect;
+            result.attrs.override_redirect = @boolToInt(ovr);
+        }
+
+        if (self.background_pixel) |bp| {
+            result.value_mask |= c.CWBackPixel;
+            result.attrs.background_pixel = bp._data;
+        }
+
+        if (self.event_mask) |em| {
+            result.value_mask |= c.CWEventMask;
+            result.attrs.event_mask = em;
+        }
+
+        return result;
+    }
+};
+
+pub const ManagedWindowRef = struct {
+    ref: WindowRef,
+
+    const Self = @This();
+
+    pub fn deinit(self: Self) void {
+        _ = c.XDestroyWindow(self.ref._display_ptr, self.ref._window_id);
+    }
 };

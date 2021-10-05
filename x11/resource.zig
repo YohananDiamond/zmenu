@@ -4,6 +4,7 @@ const testing = std.testing;
 const x11 = @import("x11.zig");
 const c = @import("bindings.zig");
 
+/// The resource type returned by the resource manager.
 pub const Resource = struct {
     value: [:0]const u8,
     type_: [*:0]const u8 = "String",
