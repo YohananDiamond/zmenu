@@ -83,7 +83,9 @@ pub const Display = struct {
     /// environment variable, which is set at the start of an X server.
     pub fn init(display_name: ?[:0]const u8) OpenError!Self {
         return Self{
-            ._ptr = c.XOpenDisplay(display_name orelse null) orelse return OpenError.FailedToOpenDisplay,
+            ._ptr = c.XOpenDisplay(
+                if (display_name) |d| d.ptr else 0
+            ) orelse return OpenError.FailedToOpenDisplay,
         };
     }
 
@@ -113,7 +115,7 @@ test "get display ref" {
     var display = try Display.init(null);
     defer display.deinit();
 
-    const d_ref = display.asRef();
+    _ = display.asRef();
 }
 
 /// A reference to a display.

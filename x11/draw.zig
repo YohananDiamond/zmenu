@@ -14,14 +14,14 @@ pub const PixmapID = c.Pixmap;
 
 /// TODO: doc
 pub const Context = struct {
-    window: x11.WindowRef,
+    window: x11.display.WindowRef,
     context: RawContext,
     pixmap: PixmapID,
 
     const Self = @This();
 
     /// Initialize the context with a specific window and size.
-    pub fn init(window: x11.WindowRef, size: Point2(u32)) Self {
+    pub fn init(window: x11.display.WindowRef, size: Point2(u32)) Self {
         // TODO: gc args
 
         var context = c.XCreateGC(
@@ -126,9 +126,9 @@ pub const Pixel = struct {
     const Self = @This();
 
     /// TODO: doc
-    pub fn withColors(colors: struct { r: u8, g: u8, b: u8, a: u8 }) Self { // TODO: default value for alpha
-        unreachable; // TODO
-    }
+    // pub fn withColors(colors: struct { r: u8, g: u8, b: u8, a: u8 }) Self { // TODO: default value for alpha
+    //     unreachable; // TODO
+    // }
 
     // From https://justpaste.it/974m7
     //

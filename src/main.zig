@@ -10,7 +10,7 @@ pub fn main() anyerror!void {
 
     std.debug.print("Opening display...\n", .{});
 
-    var display = try x11.Display.init(null);
+    var display = try x11.display.Display.init(null);
     defer display.deinit();
 
     var display_ref = display.asRef();

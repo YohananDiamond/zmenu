@@ -57,10 +57,13 @@ fn configureStep(
 ) void {
     const gmath_pkg = Pkg{
         .name = "gmath",
-        .path = "gmath/gmath.zig",
+        .source = std.build.FileSource.relative("gmath/gmath.zig"),
     };
 
-    step.addBuildOption(bool, "use_xinerama", config.use_xinerama);
+    // const options = step.addOptions("main", null);
+    // options.addOption(bool, "use_xinerama", config.use_xinerama);
+
+    // step.addBuildOption(bool, "use_xinerama", config.use_xinerama);
 
     if (config.use_xinerama) {
         step.linkSystemLibrary("Xinerama");
@@ -73,11 +76,11 @@ fn configureStep(
         // X11 Package
         step.addPackage(Pkg{
             .name = "x11",
-            .path = "x11/x11.zig",
+            .source = std.build.FileSource.relative("x11/x11.zig"),
             .dependencies = &.{gmath_pkg},
         });
 
-        step.addIncludeDir("x11");
+        step.addIncludePath("x11");
         step.addCSourceFile("x11/funcs.c", &.{"-std=c99"});
 
         step.linkSystemLibrary("c");

@@ -3,9 +3,8 @@ const std = @import("std");
 pub const c = @import("bindings.zig"); // FIXME: make this private
 
 pub const display = @import("display.zig");
-pub usingnamespace display;
 
-pub const event = @import("event.zig");
+// pub const event = @import("event.zig");
 
 pub const resource = @import("resource.zig");
 pub const Resource = resource.Resource;
